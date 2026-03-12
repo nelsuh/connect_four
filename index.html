@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Connect 4</title>
+
+<link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+
+<div class="phone">
+
+<div class="topbar">
+
+<div class="player left">
+
+<img src="https://api.dicebear.com/7.x/bottts/svg?seed=red">
+
+<div class="name">Red</div>
+
+</div>
+
+<div class="vs">VS</div>
+
+<div class="player right">
+
+<img src="https://api.dicebear.com/7.x/bottts/svg?seed=yellow">
+
+<div class="name">Yellow</div>
+
+</div>
+
+</div>
+
+
+<div class="turnIndicator" id="status">
+Your Turn
+</div>
+
+
+<div id="board"></div>
+
+
+<div class="controls">
+
+<select id="mode">
+<option value="pvp">Player vs Player</option>
+<option value="bot">Player vs Bot</option>
+</select>
+
+<select id="difficulty">
+<option value="1">Easy</option>
+<option value="3">Medium</option>
+<option value="5">Hard</option>
+</select>
+
+<button id="reset">Restart</button>
+
+</div>
+
+</div>
+
+<!-- Winner Overlay -->
+<div id="winnerOverlay">
+  <div class="winner-card" id="winnerCard">
+    <span class="winner-emoji" id="winnerEmoji">🏆</span>
+    <div class="winner-title">Winner</div>
+    <div class="winner-name" id="winnerNameDisplay">Red</div>
+    <div class="winner-sub">Connect 4 Champion!</div>
+    <button class="winner-btn" id="winnerPlayAgain">Play Again</button>
+  </div>
+</div>
+
+<script src="script.js"></script>
+
+</body>
+</html>

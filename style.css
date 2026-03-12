@@ -1,0 +1,396 @@
+*{
+box-sizing:border-box;
+}
+
+body{
+
+margin:0;
+min-height:100vh;
+
+background-size:400% 400%;
+animation:bgmove 12s infinite alternate;
+
+font-family:system-ui;
+
+background:
+radial-gradient(circle at 30% 20%, #3d42ff, transparent),
+radial-gradient(circle at 80% 90%, #ff2f6e, transparent),
+#111438;
+
+display:flex;
+align-items:center;
+justify-content:center;
+
+color:white;
+}
+
+/* phone container */
+
+.phone{
+
+width:100%;
+max-width:420px;
+
+display:flex;
+flex-direction:column;
+
+align-items:center;
+
+padding:20px;
+}
+
+/* avatars */
+
+.topbar{
+
+width:100%;
+
+display:flex;
+align-items:center;
+justify-content:space-between;
+
+margin-bottom:10px;
+}
+
+.player{
+
+display:flex;
+flex-direction:column;
+align-items:center;
+}
+
+.player img{
+
+width:50px;
+height:50px;
+
+border-radius:50%;
+
+background:white;
+}
+
+.vs{
+
+font-weight:700;
+font-size:20px;
+opacity:.7;
+}
+
+/* turn indicator */
+
+.turnIndicator{
+
+width:100%;
+
+text-align:center;
+
+background:#ffffff20;
+
+padding:6px 10px;
+
+border-radius:12px;
+
+margin-bottom:14px;
+}
+
+/* board */
+
+:root {
+  --cell-size: clamp(36px, 11vw, 46px);
+}
+
+#board{
+
+display:grid;
+
+grid-template-columns:repeat(7, var(--cell-size));
+grid-template-rows: repeat(6, var(--cell-size));
+
+gap:6px;
+
+padding:12px;
+
+border-radius:20px;
+
+background:linear-gradient(180deg,#2730a0,#1b226b);
+
+box-shadow:
+inset 0 8px 14px rgba(0,0,0,.6),
+0 10px 30px rgba(0,0,0,.4);
+}
+
+/* falling animation */
+
+.dropping{
+animation:drop .3s ease;
+}
+
+/* cells */
+
+.cell{
+
+width: var(--cell-size);
+height: var(--cell-size);
+
+border-radius:50%;
+
+background:#0e1030;
+
+display:flex;
+
+align-items:center;
+justify-content:center;
+
+cursor:pointer;
+
+box-shadow:
+inset 0 6px 10px rgba(0,0,0,.9);
+}
+
+.cell::after{
+
+content:"";
+
+width:85%;
+height:85%;
+
+border-radius:50%;
+
+transition:.25s;
+}
+
+/* red disc */
+
+.cell[data-player="1"]::after{
+
+background:radial-gradient(circle,#ff7a7a,#ff2e2e);
+
+box-shadow:0 0 12px red;
+
+animation:drop .25s ease;
+}
+
+/* yellow disc */
+
+.cell[data-player="2"]::after{
+
+background:radial-gradient(circle,#ffe27a,#ffc400);
+
+box-shadow:0 0 12px gold;
+
+animation:drop .25s ease;
+}
+
+@keyframes drop{
+
+from{
+transform:translateY(-30px);
+}
+
+to{
+transform:translateY(0);
+}
+
+}
+
+/* controls */
+
+.controls{
+margin-top:18px;
+display:flex;
+gap:10px;
+justify-content:center;
+flex-wrap:wrap;
+width:100%;
+}
+
+select{
+background: rgba(255,255,255,0.08);
+border: 1.5px solid rgba(255,255,255,0.18);
+color: white;
+padding: 10px 36px 10px 14px;
+border-radius: 14px;
+cursor: pointer;
+font-size: 13px;
+font-weight: 600;
+letter-spacing: 0.3px;
+appearance: none;
+-webkit-appearance: none;
+background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='white' stroke-width='1.8' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+background-repeat: no-repeat;
+background-position: right 12px center;
+backdrop-filter: blur(10px);
+transition: border-color 0.2s, background 0.2s;
+}
+
+select:hover{
+border-color: rgba(255,255,255,0.4);
+background-color: rgba(255,255,255,0.14);
+}
+
+select option{
+background: #1b226b;
+color: white;
+}
+
+button#reset{
+background: linear-gradient(135deg, #ff2e6e, #ff6b2e);
+border: none;
+color: white;
+padding: 10px 22px;
+border-radius: 14px;
+cursor: pointer;
+font-size: 13px;
+font-weight: 700;
+letter-spacing: 0.5px;
+text-transform: uppercase;
+box-shadow: 0 4px 15px rgba(255,46,110,0.4);
+transition: transform 0.15s, box-shadow 0.15s;
+}
+
+button#reset:hover{
+transform: translateY(-2px);
+box-shadow: 0 6px 20px rgba(255,46,110,0.6);
+}
+
+button#reset:active{
+transform: translateY(0);
+}
+
+/* winner overlay */
+
+#winnerOverlay{
+display: none;
+position: fixed;
+inset: 0;
+z-index: 100;
+align-items: center;
+justify-content: center;
+background: rgba(0,0,0,0.7);
+backdrop-filter: blur(6px);
+}
+
+#winnerOverlay.show{
+display: flex;
+animation: fadeIn 0.3s ease;
+}
+
+.winner-card{
+background: linear-gradient(145deg, #1b226b, #2730a0);
+border: 2px solid rgba(255,255,255,0.15);
+border-radius: 28px;
+padding: 40px 48px;
+text-align: center;
+box-shadow: 0 30px 80px rgba(0,0,0,0.6);
+animation: popIn 0.4s cubic-bezier(0.34,1.56,0.64,1);
+position: relative;
+overflow: hidden;
+min-width: 280px;
+}
+
+.winner-card::before{
+content:'';
+position:absolute;
+inset:0;
+background: radial-gradient(circle at 50% 0%, rgba(255,255,255,0.08), transparent 60%);
+pointer-events:none;
+}
+
+.winner-emoji{
+font-size: 64px;
+display: block;
+margin-bottom: 12px;
+animation: bounce 0.6s ease 0.3s both;
+}
+
+.winner-title{
+font-size: 13px;
+text-transform: uppercase;
+letter-spacing: 3px;
+opacity: 0.55;
+margin-bottom: 8px;
+}
+
+.winner-name{
+font-size: 44px;
+font-weight: 900;
+margin-bottom: 4px;
+text-shadow: 0 0 30px currentColor;
+}
+
+.winner-sub{
+font-size: 14px;
+opacity: 0.5;
+margin-bottom: 28px;
+}
+
+.winner-btn{
+background: white;
+color: #1b226b;
+border: none;
+padding: 14px 36px;
+border-radius: 50px;
+font-size: 15px;
+font-weight: 800;
+cursor: pointer;
+letter-spacing: 0.3px;
+transition: transform 0.15s, box-shadow 0.15s;
+box-shadow: 0 6px 20px rgba(0,0,0,0.3);
+}
+
+.winner-btn:hover{
+transform: translateY(-2px) scale(1.04);
+box-shadow: 0 10px 28px rgba(0,0,0,0.4);
+}
+
+.confetti-piece{
+position: absolute;
+width: 9px;
+height: 9px;
+border-radius: 2px;
+animation: confettiFall 1.4s ease-out forwards;
+}
+
+@keyframes confettiFall{
+0%{ transform: translateY(-10px) rotate(0deg); opacity:1; }
+100%{ transform: translateY(320px) rotate(760deg); opacity:0; }
+}
+
+@keyframes fadeIn{
+from{ opacity:0; }
+to{ opacity:1; }
+}
+
+@keyframes popIn{
+from{ transform: scale(0.4); opacity:0; }
+to{ transform: scale(1); opacity:1; }
+}
+
+@keyframes bounce{
+0%{ transform: scale(0) rotate(-20deg); }
+60%{ transform: scale(1.3) rotate(10deg); }
+100%{ transform: scale(1) rotate(0deg); }
+}
+
+.cell.winner::after{
+animation: winPulse 0.5s ease infinite alternate !important;
+}
+
+@keyframes winPulse{
+from{ transform: scale(1); }
+to{ transform: scale(1.18); filter: brightness(1.4); }
+}
+
+/* animated background */
+
+@keyframes bgmove{
+
+0%{
+background-position:0% 50%;
+}
+
+100%{
+background-position:100% 50%;
+}
+
+}
