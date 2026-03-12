@@ -16,6 +16,10 @@ let waitingForOpponent = false;
 let rematchRequested = false;
 let lastWinnerPlayer = 0;
 let lastSequence = 0; // Track last processed action sequence
+let connectedCount = 0; // Live socket joins, not just authorized participants
+let pendingMove = false; // Wait for server echo before allowing another multiplayer move
+let lastSnapshotVersion = 0; // Ignore stale realtime board snapshots
+let rematchState = "idle"; // idle | requested
 
 // ── DOM refs ──────────────────────────────────────────────
 const boardEl          = document.getElementById("board");
@@ -95,9 +99,11 @@ function onJoined(data) {
   Usion.log("onJoined: " + JSON.stringify({
     player_ids: data.player_ids,
     sequence: data.sequence,
-    status: data.status
+    status: data.status,
+    connected_count: data.connected_count
   }));
   players = data.player_ids || [];
+  connectedCount = Number(data.connected_count || 0);
   if (data.sequence !== undefined) lastSequence = data.sequence;
 
   // Announce our identity to the room
@@ -106,12 +112,8 @@ function onJoined(data) {
     avatar: playerAvatars[myId] || null
   });
 
-  if (players.length >= 2 && waitingForOpponent) {
+  if (connectedCount >= 2 && waitingForOpponent) {
     startOnlineGame();
-    // Request sync to catch any actions we may have missed
-    if (lastSequence > 0) {
-      Usion.game.requestSync(0);
-    }
   }
 }
 
@@ -126,17 +128,21 @@ function onPlayerJoined(data) {
   } else if (data.player && data.player.id && !players.includes(data.player.id)) {
     players.push(data.player.id);
   }
+  if (data.player && data.player.is_connected) {
+    connectedCount = Math.max(connectedCount, 2);
+  }
   // Re-broadcast our identity to the new joiner
   Usion.game.realtime("player_info", {
     name: playerNames[myId],
     avatar: playerAvatars[myId] || null
   });
-  if (players.length >= 2 && waitingForOpponent) {
+  if (connectedCount >= 2 && waitingForOpponent) {
     startOnlineGame();
   }
 }
 
 function onPlayerLeft(data) {
+  connectedCount = Math.max(0, connectedCount - 1);
   if (!gameOver) {
     updateStatus("Opponent left the game");
   }
@@ -145,13 +151,17 @@ function onPlayerLeft(data) {
 function onAction(data) {
   Usion.log("onAction: type=" + data.action_type + " player=" + data.player_id + " myId=" + myId + " seq=" + data.sequence);
   if (data.sequence !== undefined) lastSequence = Math.max(lastSequence, data.sequence);
-  if (data.action_type === "move" && data.player_id !== myId) {
-    handleMove(data.action_data.col, false);
+  if (data.action_type === "move" && data.player_id === myId) {
+    pendingMove = false;
   }
 }
 
 function onSync(data) {
   Usion.log("onSync: actions=" + (data.actions ? data.actions.length : 0) + " seq=" + data.sequence);
+  pendingMove = false;
+  if (data.sequence !== undefined) {
+    lastSnapshotVersion = Math.max(lastSnapshotVersion, Number(data.sequence) || 0);
+  }
   if (!data.actions || data.actions.length === 0) return;
   if (data.sequence !== undefined) lastSequence = data.sequence;
 
@@ -195,21 +205,31 @@ function onRealtime(data) {
     if (data.action_data.name)   playerNames[data.player_id]   = data.action_data.name;
     if (data.action_data.avatar) playerAvatars[data.player_id] = data.action_data.avatar;
     updatePlayerDisplay();
+    return;
+  }
+
+  if (data.action_type === "board_state" && data.action_data) {
+    if (data.player_id === myId) return;
+    applyBoardSnapshot(data.action_data);
+    return;
+  }
+
+  if (data.action_type === "rematch_state" && data.action_data) {
+    applyRematchState(data.action_data);
   }
 }
 
 function onRematchRequest(data) {
   if (data.player_id === myId) return;
   if (rematchRequested) {
-    // Both sides have requested — start new game
     resetForRematch();
-  } else {
-    // Show accept prompt on the overlay button
-    winnerPlayAgain.textContent = "Accept Rematch";
-    winnerPlayAgain.disabled = false;
-    winnerPlayAgain.onclick = acceptRematch;
+    broadcastBoardSnapshot();
+    return;
   }
+  rematchState = "requested";
+  syncRematchUi();
 }
+
 
 function onGameRestarted() {
   resetForRematch();
@@ -226,6 +246,9 @@ function startOnlineGame() {
   hideWaiting();
   syncControlVisibility();
   init();
+
+  // Always sync once at game start so a move sent during the join race is replayed.
+  Usion.game.requestSync(0);
 }
 
 function updatePlayerDisplay() {
@@ -316,19 +339,24 @@ winnerShare.addEventListener("click", () => {
 
 function requestRematch() {
   rematchRequested = true;
+  rematchState = "requested";
+  syncRematchUi();
+  broadcastRematchState();
   Usion.game.requestRematch();
-  winnerPlayAgain.textContent = "Waiting for rematch…";
-  winnerPlayAgain.disabled = true;
 }
 
 function acceptRematch() {
   rematchRequested = true;
-  Usion.game.requestRematch();
   resetForRematch();
+  broadcastBoardSnapshot();
+  Usion.game.requestRematch();
 }
 
 function resetForRematch() {
   rematchRequested = false;
+  rematchState = "idle";
+  pendingMove = false;
+  lastSnapshotVersion = 0;
   winnerOverlay.classList.remove("show");
   winnerPlayAgain.textContent = "Rematch";
   winnerPlayAgain.disabled = false;
@@ -336,17 +364,22 @@ function resetForRematch() {
   init();
 }
 
+
 // ── Game Core ─────────────────────────────────────────────
 
 function init() {
   board = Array.from({ length: ROWS }, () => Array(COLS).fill(0));
   current = 1;
   gameOver = false;
+  pendingMove = false;
   lastWinnerPlayer = 0;
+  lastSnapshotVersion = 0;
+  rematchState = "idle";
   winnerOverlay.classList.remove("show");
   renderBoard();
   updateStatus();
 }
+
 
 function renderBoard() {
   boardEl.innerHTML = "";
@@ -362,40 +395,178 @@ function renderBoard() {
   }
 }
 
+function playerLabelForStatus(playerId, fallback) {
+  if (!playerId) return fallback || "Player";
+  return playerNames[playerId] || fallback || "Player";
+}
+
 function updateStatus(text) {
   if (text) { statusEl.textContent = text; return; }
-  if (gameOver) return;
 
   if (isMultiplayer) {
-    const color = current === 1 ? "#ff2e2e" : "#ffc400";
-    if (current === myPlayer) {
-      statusEl.innerHTML = `<span style="color:${color};font-weight:700;">Your turn</span>`;
-    } else {
-      statusEl.innerHTML = `<span style="color:${color};font-weight:700;">Opponent's turn</span>`;
+    if (gameOver) {
+      if (lastWinnerPlayer) {
+        const winnerId = players[lastWinnerPlayer - 1];
+        updateStatus("🎉 " + playerLabelForStatus(winnerId, "Winner") + " wins!");
+      } else {
+        updateStatus("Draw!");
+      }
+      return;
     }
-  } else {
-    const name  = current === 1 ? "Red" : "Yellow";
+
+    const currentPlayerId = players[current - 1];
+    const currentPlayerName = playerLabelForStatus(currentPlayerId, current === 1 ? "Red" : "Yellow");
     const color = current === 1 ? "#ff2e2e" : "#ffc400";
-    statusEl.innerHTML = `<span style="color:${color};font-weight:700;">${name}</span>'s turn`;
+    statusEl.innerHTML = '<span style="color:' + color + ';font-weight:700;">' + currentPlayerName + '</span>\'s turn';
+    return;
   }
+
+  if (gameOver) return;
+  const name  = current === 1 ? "Red" : "Yellow";
+  const color = current === 1 ? "#ff2e2e" : "#ffc400";
+  statusEl.innerHTML = '<span style="color:' + color + ';font-weight:700;">' + name + '</span>\'s turn';
 }
+
 
 boardEl.addEventListener("click", (e) => {
   if (gameOver) return;
 
-  if (isMultiplayer) {
-    if (current !== myPlayer) return;
-  } else {
-    if (modeSelect.value === "bot" && current === 2) return;
-  }
-
   const cell = e.target.closest(".cell");
   if (!cell) return;
+  const col = Number(cell.dataset.col);
 
-  handleMove(Number(cell.dataset.col), true);
+  if (isMultiplayer) {
+    if (current !== myPlayer || pendingMove) return;
+    pendingMove = true;
+    const applied = handleMove(col, true);
+    if (!applied) {
+      pendingMove = false;
+      return;
+    }
+    broadcastBoardSnapshot();
+    Usion.game.action("move", { col }).catch((err) => {
+      pendingMove = false;
+      Usion.log("move send failed: " + (err && err.message ? err.message : err));
+      Usion.game.requestSync(0);
+    });
+    return;
+  }
+
+  if (modeSelect.value === "bot" && current === 2) return;
+  handleMove(col, true);
 });
 
-// local=true → initiated by this client (send to server); false → received from opponent
+function cloneBoardState() {
+  return board.map((row) => row.slice());
+}
+
+function getBoardSnapshot() {
+  return {
+    board: cloneBoardState(),
+    current,
+    gameOver,
+    lastWinnerPlayer,
+    winnerOverlayVisible: gameOver,
+    rematchState,
+    version: Date.now(),
+  };
+}
+
+function broadcastBoardSnapshot() {
+  if (!isMultiplayer) return;
+  const snapshot = getBoardSnapshot();
+  lastSnapshotVersion = Math.max(lastSnapshotVersion, Number(snapshot.version) || 0);
+  Usion.game.realtime("board_state", snapshot);
+}
+
+function broadcastRematchState() {
+  if (!isMultiplayer) return;
+  Usion.game.realtime("rematch_state", { state: rematchState });
+}
+
+function syncRematchUi() {
+  if (!isMultiplayer || !gameOver) return;
+
+  if (rematchState === "requested") {
+    if (rematchRequested) {
+      winnerPlayAgain.textContent = "Waiting for rematch...";
+      winnerPlayAgain.disabled = true;
+      winnerPlayAgain.onclick = requestRematch;
+    } else {
+      winnerPlayAgain.textContent = "Accept Rematch";
+      winnerPlayAgain.disabled = false;
+      winnerPlayAgain.onclick = acceptRematch;
+    }
+    return;
+  }
+
+  winnerPlayAgain.textContent = "Rematch";
+  winnerPlayAgain.disabled = false;
+  winnerPlayAgain.onclick = requestRematch;
+}
+
+function showWinnerOverlay() {
+  if (!gameOver || !lastWinnerPlayer) return;
+
+  const winnerId = isMultiplayer ? players[lastWinnerPlayer - 1] : null;
+  const winnerName = isMultiplayer
+    ? playerLabelForStatus(winnerId, lastWinnerPlayer === 1 ? "Red" : "Yellow")
+    : (lastWinnerPlayer === 1 ? "Red" : "Yellow");
+  const color = lastWinnerPlayer === 1 ? "#ff4444" : "#ffc400";
+
+  winnerNameDisplay.textContent = winnerName;
+  winnerNameDisplay.style.color = color;
+  winnerEmoji.textContent = lastWinnerPlayer === 1 ? "🔴" : "🟡";
+  winnerOverlay.classList.add("show");
+  syncRematchUi();
+}
+
+function applyRematchState(payload) {
+  const nextState = String(payload.state || "idle");
+  if (!["idle", "requested"].includes(nextState)) return;
+  rematchState = nextState;
+  syncRematchUi();
+}
+
+function applyBoardSnapshot(snapshot) {
+  const version = Number(snapshot.version || 0);
+  if (version && version < lastSnapshotVersion) return;
+  lastSnapshotVersion = Math.max(lastSnapshotVersion, version);
+  if (Array.isArray(snapshot.board)) {
+    board = snapshot.board.map((row) => Array.isArray(row) ? row.slice() : Array(COLS).fill(0));
+  }
+  current = snapshot.current === 2 ? 2 : 1;
+  gameOver = !!snapshot.gameOver;
+  lastWinnerPlayer = snapshot.lastWinnerPlayer === 2 ? 2 : (snapshot.lastWinnerPlayer === 1 ? 1 : 0);
+  rematchState = ["idle", "requested"].includes(snapshot.rematchState) ? snapshot.rematchState : rematchState;
+  pendingMove = false;
+  winnerOverlay.classList.remove("show");
+  renderBoard();
+  if (gameOver && lastWinnerPlayer) {
+    const cells = findWinningCells(lastWinnerPlayer);
+    if (cells.length >= 4) {
+      for (const [row, col] of cells) {
+        const el = boardEl.children[row * COLS + col];
+        if (el) el.classList.add("winner");
+      }
+    }
+    const winnerId = isMultiplayer ? players[lastWinnerPlayer - 1] : null;
+    const name = isMultiplayer
+      ? playerLabelForStatus(winnerId, lastWinnerPlayer === 1 ? "Red" : "Yellow")
+      : (lastWinnerPlayer === 1 ? "Red" : "Yellow");
+    updateStatus("🎉 " + name + " wins!");
+    if (snapshot.winnerOverlayVisible !== false) {
+      showWinnerOverlay();
+    }
+  } else if (isFull()) {
+    updateStatus("Draw!");
+  } else {
+    updateStatus();
+  }
+}
+
+
+// local=true → initiated by this client; false → local bot/offline replay
 function handleMove(col, local = true) {
   for (let r = ROWS - 1; r >= 0; r--) {
     if (board[r][col] !== 0) continue;
@@ -403,23 +574,18 @@ function handleMove(col, local = true) {
     board[r][col] = current;
     renderBoard();
 
-    if (local && isMultiplayer) {
-      Usion.game.action("move", { col });
-    }
-
     if (checkWin(r, col, current)) {
       gameOver = true;
       lastWinnerPlayer = current;
       highlightWinner(r, col, current);
 
       const winnerId   = isMultiplayer ? players[current - 1] : null;
-      const winnerIsMe = !isMultiplayer || winnerId === myId;
       const name  = isMultiplayer
-        ? (winnerIsMe ? "You" : (playerNames[winnerId] || "Opponent"))
+        ? playerLabelForStatus(winnerId, current === 1 ? "Red" : "Yellow")
         : (current === 1 ? "Red" : "Yellow");
       const color = current === 1 ? "#ff4444" : "#ffc400";
 
-      updateStatus(`🎉 ${name} wins!`);
+      updateStatus("🎉 " + name + " wins!");
 
       setTimeout(() => {
         winnerNameDisplay.textContent = name;
@@ -429,9 +595,9 @@ function handleMove(col, local = true) {
         winnerOverlay.classList.add("show");
 
         if (isMultiplayer) {
-          winnerPlayAgain.textContent = "Rematch";
-          winnerPlayAgain.disabled = false;
-          winnerPlayAgain.onclick = requestRematch;
+          rematchState = "idle";
+          syncRematchUi();
+
         } else {
           winnerPlayAgain.textContent = "Play Again";
           winnerPlayAgain.disabled = false;
@@ -455,8 +621,9 @@ function handleMove(col, local = true) {
       }
     }
 
-    return;
+    return true;
   }
+  return false;
 }
 
 function isFull() {
@@ -472,6 +639,29 @@ function checkWin(r, c, player) {
     if (count >= 4) return true;
   }
   return false;
+}
+
+function findWinningCells(player) {
+  for (let r = 0; r < ROWS; r++) {
+    for (let c = 0; c < COLS; c++) {
+      if (board[r][c] !== player) continue;
+      const dirs = [[0,1],[1,0],[1,1],[1,-1]];
+      for (const [dr, dc] of dirs) {
+        const line = [];
+        let rr = r;
+        let cc = c;
+        while (rr >= 0 && rr < ROWS && cc >= 0 && cc < COLS && board[rr][cc] === player) {
+          line.push([rr, cc]);
+          rr += dr;
+          cc += dc;
+        }
+        if (line.length >= 4) {
+          return line;
+        }
+      }
+    }
+  }
+  return [];
 }
 
 function countDir(r, c, dr, dc, player) {
