@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Connect 4</title>
-
+<link rel="stylesheet" href="https://usions.com/usion-design-system.css">
 <link rel="stylesheet" href="style.css">
 </head>
 
@@ -12,54 +12,52 @@
 
 <div class="phone">
 
-<div class="topbar">
+  <div class="topbar">
 
-<div class="player left">
+    <div class="player left" id="player1Panel">
+      <img id="player1Avatar" src="https://api.dicebear.com/7.x/bottts/svg?seed=red">
+      <div class="name" id="player1Name">Red</div>
+    </div>
 
-<img src="https://api.dicebear.com/7.x/bottts/svg?seed=red">
+    <div class="vs">VS</div>
 
-<div class="name">Red</div>
+    <div class="player right" id="player2Panel">
+      <img id="player2Avatar" src="https://api.dicebear.com/7.x/bottts/svg?seed=yellow">
+      <div class="name" id="player2Name">Yellow</div>
+    </div>
 
-</div>
+  </div>
 
-<div class="vs">VS</div>
+  <div class="turnIndicator" id="status">Your Turn</div>
 
-<div class="player right">
+  <div id="board"></div>
 
-<img src="https://api.dicebear.com/7.x/bottts/svg?seed=yellow">
+  <div class="controls">
 
-<div class="name">Yellow</div>
+    <select id="mode">
+      <option value="online">Online</option>
+      <option value="bot">vs Bot</option>
+    </select>
 
-</div>
+    <select id="difficulty">
+      <option value="1">Easy</option>
+      <option value="3">Medium</option>
+      <option value="5">Hard</option>
+    </select>
 
-</div>
+    <button id="reset">Restart</button>
 
-
-<div class="turnIndicator" id="status">
-Your Turn
-</div>
-
-
-<div id="board"></div>
-
-
-<div class="controls">
-
-<select id="mode">
-<option value="pvp">Player vs Player</option>
-<option value="bot">Player vs Bot</option>
-</select>
-
-<select id="difficulty">
-<option value="1">Easy</option>
-<option value="3">Medium</option>
-<option value="5">Hard</option>
-</select>
-
-<button id="reset">Restart</button>
+  </div>
 
 </div>
 
+<!-- Waiting Overlay -->
+<div id="waitingOverlay" class="waiting-overlay">
+  <div class="waiting-card">
+    <div class="waiting-spinner"></div>
+    <p class="waiting-text">Waiting for opponent…</p>
+    <button class="waiting-bot-btn" id="playBotBtn">Play vs Bot instead</button>
+  </div>
 </div>
 
 <!-- Winner Overlay -->
@@ -69,10 +67,14 @@ Your Turn
     <div class="winner-title">Winner</div>
     <div class="winner-name" id="winnerNameDisplay">Red</div>
     <div class="winner-sub">Connect 4 Champion!</div>
-    <button class="winner-btn" id="winnerPlayAgain">Play Again</button>
+    <div class="winner-actions">
+      <button class="winner-btn" id="winnerPlayAgain">Play Again</button>
+      <button class="winner-btn winner-btn-share" id="winnerShare">Share</button>
+    </div>
   </div>
 </div>
 
+<script src="https://usions.com/usion-sdk.js"></script>
 <script src="script.js"></script>
 
 </body>
