@@ -559,54 +559,105 @@ function applyBoardSnapshot(snapshot) {
 }
 
 
+function animateDrop(col, targetRow, player, onDone) {
+  const cellSize = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--cell-size')) || 46;
+  const gap = 6;
+  const step = cellSize + gap;
+  const boardPad = 12;
+
+  const disk = document.createElement("div");
+  disk.className = "drop-disk";
+  disk.dataset.player = player;
+
+  const left = boardPad + col * step + (step - cellSize) / 2 + cellSize * 0.075;
+  disk.style.width  = (cellSize * 0.85) + "px";
+  disk.style.height = (cellSize * 0.85) + "px";
+  disk.style.left   = left + "px";
+
+  const startTop = boardPad + (cellSize - cellSize * 0.85) / 2;
+  const endTop   = boardPad + targetRow * step + (cellSize - cellSize * 0.85) / 2;
+
+  disk.style.top = startTop + "px";
+  boardEl.appendChild(disk);
+
+  const duration = 60 + targetRow * 40; // ms, faster for top rows
+  const startTime = performance.now();
+
+  function frame(now) {
+    const elapsed = now - startTime;
+    const t = Math.min(elapsed / duration, 1);
+    // ease-in (accelerate downward)
+    const eased = t * t;
+    disk.style.top = (startTop + (endTop - startTop) * eased) + "px";
+    if (t < 1) {
+      requestAnimationFrame(frame);
+    } else {
+      disk.remove();
+      onDone();
+    }
+  }
+  requestAnimationFrame(frame);
+}
+
 // local=true → initiated by this client; false → local bot/offline replay
 function handleMove(col, local = true) {
   for (let r = ROWS - 1; r >= 0; r--) {
     if (board[r][col] !== 0) continue;
 
-    board[r][col] = current;
+    const player = current;
+    board[r][col] = player;
     lastInsertedPos = { r, c: col };
-    renderBoard();
 
-    if (checkWin(r, col, current)) {
+    const isWin  = checkWin(r, col, current);
+    const isDraw = !isWin && isFull();
+
+    if (isWin) {
       gameOver = true;
       lastWinnerPlayer = current;
-      highlightWinner(r, col, current);
-
-      const winnerId   = isMultiplayer ? players[current - 1] : null;
-      const name  = isMultiplayer
-        ? playerLabelForStatus(winnerId, current === 1 ? "Red" : "Yellow")
-        : (current === 1 ? "Red" : "Yellow");
-      const color = current === 1 ? "#ff4444" : "#ffc400";
-
-      updateStatus("🎉 " + name + " wins!");
-
-      setTimeout(() => {
-        winnerNameDisplay.textContent = name;
-        winnerNameDisplay.style.color = color;
-        winnerEmoji.textContent = current === 1 ? "🔴" : "🟡";
-        spawnConfetti();
-        winnerOverlay.classList.add("show");
-
-        if (isMultiplayer) {
-          rematchState = "idle";
-          syncRematchUi();
-
-        } else {
-          winnerPlayAgain.textContent = "Play Again";
-          winnerPlayAgain.disabled = false;
-          winnerPlayAgain.onclick = () => {
-            winnerOverlay.classList.remove("show");
-            init();
-          };
-        }
-      }, 600);
-
-    } else if (isFull()) {
+    } else if (isDraw) {
       gameOver = true;
-      updateStatus("Draw!");
+    }
 
-    } else {
+    animateDrop(col, r, player, () => {
+      renderBoard();
+
+      if (isWin) {
+        highlightWinner(r, col, player);
+
+        const winnerId = isMultiplayer ? players[player - 1] : null;
+        const name  = isMultiplayer
+          ? playerLabelForStatus(winnerId, player === 1 ? "Red" : "Yellow")
+          : (player === 1 ? "Red" : "Yellow");
+        const color = player === 1 ? "#ff4444" : "#ffc400";
+
+        updateStatus("🎉 " + name + " wins!");
+
+        setTimeout(() => {
+          winnerNameDisplay.textContent = name;
+          winnerNameDisplay.style.color = color;
+          winnerEmoji.textContent = player === 1 ? "🔴" : "🟡";
+          spawnConfetti();
+          winnerOverlay.classList.add("show");
+
+          if (isMultiplayer) {
+            rematchState = "idle";
+            syncRematchUi();
+          } else {
+            winnerPlayAgain.textContent = "Play Again";
+            winnerPlayAgain.disabled = false;
+            winnerPlayAgain.onclick = () => {
+              winnerOverlay.classList.remove("show");
+              init();
+            };
+          }
+        }, 600);
+
+      } else if (isDraw) {
+        updateStatus("Draw!");
+      }
+    });
+
+    if (!isWin && !isDraw) {
       current = current === 1 ? 2 : 1;
       updateStatus();
 

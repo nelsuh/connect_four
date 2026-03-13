@@ -101,6 +101,8 @@ margin-bottom:14px;
 
 #board{
 
+position: relative;
+
 display:grid;
 
 grid-template-columns:repeat(7, var(--cell-size));
@@ -172,6 +174,27 @@ background:radial-gradient(circle,#ffe27a,#ffc400);
 box-shadow:0 0 12px gold;
 }
 
+
+/* drop overlay disk */
+
+.drop-disk{
+position: absolute;
+border-radius: 50%;
+width: 85%;
+height: 85%;
+pointer-events: none;
+z-index: 10;
+}
+
+.drop-disk[data-player="1"]{
+background: radial-gradient(circle,#ff7a7a,#ff2e2e);
+box-shadow: 0 0 12px red;
+}
+
+.drop-disk[data-player="2"]{
+background: radial-gradient(circle,#ffe27a,#ffc400);
+box-shadow: 0 0 12px gold;
+}
 
 /* last inserted disk — glowing border pulse (color per player) */
 
