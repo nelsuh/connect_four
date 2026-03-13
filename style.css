@@ -119,12 +119,6 @@ inset 0 8px 14px rgba(0,0,0,.6),
 0 10px 30px rgba(0,0,0,.4);
 }
 
-/* falling animation */
-
-.dropping{
-animation:drop .3s ease;
-}
-
 /* cells */
 
 .cell{
@@ -145,6 +139,8 @@ cursor:pointer;
 
 box-shadow:
 inset 0 6px 10px rgba(0,0,0,.9);
+
+overflow: hidden;
 }
 
 .cell::after{
@@ -166,8 +162,6 @@ transition:.25s;
 background:radial-gradient(circle,#ff7a7a,#ff2e2e);
 
 box-shadow:0 0 12px red;
-
-animation:drop .25s ease;
 }
 
 /* yellow disc */
@@ -177,20 +171,59 @@ animation:drop .25s ease;
 background:radial-gradient(circle,#ffe27a,#ffc400);
 
 box-shadow:0 0 12px gold;
-
-animation:drop .25s ease;
 }
 
-@keyframes drop{
+/* smooth drop — translateY set inline via --drop-from */
 
+.cell[data-player]::after{
+animation: dropSmooth var(--drop-dur, 0.45s) cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
+}
+
+@keyframes dropSmooth{
 from{
-transform:translateY(-30px);
+  transform: translateY(var(--drop-from, -260px));
+  opacity: 0.7;
+}
+60%{
+  transform: translateY(4px);
+  opacity: 1;
+}
+80%{
+  transform: translateY(-3px);
+}
+100%{
+  transform: translateY(0);
+  opacity: 1;
+}
 }
 
+/* last inserted disk — glowing border pulse */
+
+.cell.last-inserted::after{
+outline: none;
+}
+
+.cell.last-inserted{
+box-shadow:
+  inset 0 6px 10px rgba(0,0,0,.9),
+  0 0 0 3px rgba(255,255,255,0.9),
+  0 0 14px 4px rgba(255,255,255,0.5);
+animation: lastInsertedGlow 1.4s ease-in-out infinite alternate;
+}
+
+@keyframes lastInsertedGlow{
+from{
+  box-shadow:
+    inset 0 6px 10px rgba(0,0,0,.9),
+    0 0 0 2px rgba(255,255,255,0.7),
+    0 0 10px 3px rgba(255,255,255,0.35);
+}
 to{
-transform:translateY(0);
+  box-shadow:
+    inset 0 6px 10px rgba(0,0,0,.9),
+    0 0 0 3px rgba(255,255,255,1),
+    0 0 20px 7px rgba(255,255,255,0.6);
 }
-
 }
 
 /* controls */

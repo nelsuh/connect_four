@@ -375,13 +375,16 @@ function init() {
   lastWinnerPlayer = 0;
   lastSnapshotVersion = 0;
   rematchState = "idle";
+  lastInsertedPos = null;
   winnerOverlay.classList.remove("show");
   renderBoard();
   updateStatus();
 }
 
 
-function renderBoard() {
+let lastInsertedPos = null; // {r, c} of the most recently placed disk
+
+function renderBoard(animatePos = null) {
   boardEl.innerHTML = "";
   for (let r = 0; r < ROWS; r++) {
     for (let c = 0; c < COLS; c++) {
@@ -389,7 +392,22 @@ function renderBoard() {
       cell.className = "cell";
       cell.dataset.row = r;
       cell.dataset.col = c;
-      if (board[r][c]) cell.dataset.player = board[r][c];
+      if (board[r][c]) {
+        cell.dataset.player = board[r][c];
+        if (animatePos && animatePos.r === r && animatePos.c === c) {
+          // drop distance: cell travels from above the board down to row r
+          // each cell is (cell-size + gap), roughly. Use row index as multiplier.
+          const cellSize = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--cell-size')) || 46;
+          const gap = 6;
+          const dropPx = (r + 1) * (cellSize + gap) + 20;
+          const dur = Math.min(0.15 + r * 0.06, 0.55);
+          cell.style.setProperty('--drop-from', `-${dropPx}px`);
+          cell.style.setProperty('--drop-dur', `${dur}s`);
+        }
+        if (lastInsertedPos && lastInsertedPos.r === r && lastInsertedPos.c === c) {
+          cell.classList.add("last-inserted");
+        }
+      }
       boardEl.appendChild(cell);
     }
   }
@@ -540,6 +558,7 @@ function applyBoardSnapshot(snapshot) {
   lastWinnerPlayer = snapshot.lastWinnerPlayer === 2 ? 2 : (snapshot.lastWinnerPlayer === 1 ? 1 : 0);
   rematchState = ["idle", "requested"].includes(snapshot.rematchState) ? snapshot.rematchState : rematchState;
   pendingMove = false;
+  lastInsertedPos = null;
   winnerOverlay.classList.remove("show");
   renderBoard();
   if (gameOver && lastWinnerPlayer) {
@@ -572,7 +591,8 @@ function handleMove(col, local = true) {
     if (board[r][col] !== 0) continue;
 
     board[r][col] = current;
-    renderBoard();
+    lastInsertedPos = { r, c: col };
+    renderBoard({ r, c: col });
 
     if (checkWin(r, col, current)) {
       gameOver = true;
