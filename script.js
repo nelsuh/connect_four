@@ -363,7 +363,7 @@ function init() {
 
 let lastInsertedPos = null; // {r, c} of the most recently placed disk
 
-function renderBoard(animatePos = null) {
+function renderBoard() {
   boardEl.innerHTML = "";
   for (let r = 0; r < ROWS; r++) {
     for (let c = 0; c < COLS; c++) {
@@ -373,16 +373,6 @@ function renderBoard(animatePos = null) {
       cell.dataset.col = c;
       if (board[r][c]) {
         cell.dataset.player = board[r][c];
-        if (animatePos && animatePos.r === r && animatePos.c === c) {
-          // drop distance: cell travels from above the board down to row r
-          // each cell is (cell-size + gap), roughly. Use row index as multiplier.
-          const cellSize = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--cell-size')) || 46;
-          const gap = 6;
-          const dropPx = (r + 1) * (cellSize + gap) + 20;
-          const dur = Math.min(0.15 + r * 0.06, 0.55);
-          cell.style.setProperty('--drop-from', `-${dropPx}px`);
-          cell.style.setProperty('--drop-dur', `${dur}s`);
-        }
         if (lastInsertedPos && lastInsertedPos.r === r && lastInsertedPos.c === c) {
           cell.classList.add("last-inserted");
         }
@@ -576,7 +566,7 @@ function handleMove(col, local = true) {
 
     board[r][col] = current;
     lastInsertedPos = { r, c: col };
-    renderBoard({ r, c: col });
+    renderBoard();
 
     if (checkWin(r, col, current)) {
       gameOver = true;
