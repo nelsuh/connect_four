@@ -25,7 +25,6 @@ let rematchState = "idle"; // idle | requested
 const boardEl          = document.getElementById("board");
 const statusEl         = document.getElementById("status");
 const resetBtn         = document.getElementById("reset");
-const modeSelect       = document.getElementById("mode");
 const diffSelect       = document.getElementById("difficulty");
 const winnerOverlay    = document.getElementById("winnerOverlay");
 const winnerNameDisplay= document.getElementById("winnerNameDisplay");
@@ -52,7 +51,6 @@ Usion.init(async function(config) {
     await setupMultiplayer(config.roomId);
   } else {
     hideWaiting();
-    modeSelect.value = "bot";
     syncControlVisibility();
     setPlayerDisplayBot();
     init();
@@ -88,7 +86,6 @@ async function setupMultiplayer(roomId) {
   } catch (err) {
     console.error("Multiplayer setup failed:", err);
     hideWaiting();
-    modeSelect.value = "bot";
     syncControlVisibility();
     setPlayerDisplayBot();
     init();
@@ -238,7 +235,6 @@ function onGameRestarted() {
 function startOnlineGame() {
   isMultiplayer = true;
   waitingForOpponent = false;
-  modeSelect.value = "online";
 
   myPlayer = players.indexOf(myId) + 1; // 1 or 2
 
@@ -288,7 +284,6 @@ function hideWaiting() {
 playBotBtn.addEventListener("click", () => {
   isMultiplayer = false;
   waitingForOpponent = false;
-  modeSelect.value = "bot";
   hideWaiting();
   syncControlVisibility();
   setPlayerDisplayBot();
@@ -298,24 +293,8 @@ playBotBtn.addEventListener("click", () => {
 // ── Controls ──────────────────────────────────────────────
 
 function syncControlVisibility() {
-  const isBotMode = modeSelect.value === "bot";
-  diffSelect.style.display = isBotMode ? "" : "none";
+  diffSelect.style.display = isMultiplayer ? "none" : "";
 }
-
-modeSelect.addEventListener("change", () => {
-  syncControlVisibility();
-  if (!isMultiplayer) {
-    if (modeSelect.value === "bot") {
-      setPlayerDisplayBot();
-    } else {
-      player1Name.textContent = "Red";
-      player1Avatar.src = "https://api.dicebear.com/7.x/bottts/svg?seed=red";
-      player2Name.textContent = "Yellow";
-      player2Avatar.src = "https://api.dicebear.com/7.x/bottts/svg?seed=yellow";
-    }
-    init();
-  }
-});
 
 resetBtn.addEventListener("click", () => {
   if (isMultiplayer) {
@@ -470,7 +449,7 @@ boardEl.addEventListener("click", (e) => {
     return;
   }
 
-  if (modeSelect.value === "bot" && current === 2) return;
+  if (current === 2) return; // bot's turn
   handleMove(col, true);
 });
 
@@ -636,7 +615,7 @@ function handleMove(col, local = true) {
       current = current === 1 ? 2 : 1;
       updateStatus();
 
-      if (!isMultiplayer && modeSelect.value === "bot" && current === 2 && !gameOver) {
+      if (!isMultiplayer && current === 2 && !gameOver) {
         botMove();
       }
     }
