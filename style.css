@@ -196,32 +196,43 @@ from{
 }
 }
 
-/* last inserted disk — glowing border pulse */
+/* last inserted disk — glowing border pulse (color per player) */
 
-.cell.last-inserted::after{
-outline: none;
+.cell[data-player="1"].last-inserted{
+animation: lastInsertedGlowRed 1.4s ease-in-out infinite alternate;
 }
 
-.cell.last-inserted{
-box-shadow:
-  inset 0 6px 10px rgba(0,0,0,.9),
-  0 0 0 3px rgba(255,255,255,0.9),
-  0 0 14px 4px rgba(255,255,255,0.5);
-animation: lastInsertedGlow 1.4s ease-in-out infinite alternate;
+.cell[data-player="2"].last-inserted{
+animation: lastInsertedGlowYellow 1.4s ease-in-out infinite alternate;
 }
 
-@keyframes lastInsertedGlow{
+@keyframes lastInsertedGlowRed{
 from{
   box-shadow:
     inset 0 6px 10px rgba(0,0,0,.9),
-    0 0 0 2px rgba(255,255,255,0.7),
-    0 0 10px 3px rgba(255,255,255,0.35);
+    0 0 0 2px rgba(255,60,60,0.8),
+    0 0 10px 3px rgba(255,60,60,0.4);
 }
 to{
   box-shadow:
     inset 0 6px 10px rgba(0,0,0,.9),
-    0 0 0 3px rgba(255,255,255,1),
-    0 0 20px 7px rgba(255,255,255,0.6);
+    0 0 0 3px rgba(255,80,80,1),
+    0 0 22px 8px rgba(255,60,60,0.7);
+}
+}
+
+@keyframes lastInsertedGlowYellow{
+from{
+  box-shadow:
+    inset 0 6px 10px rgba(0,0,0,.9),
+    0 0 0 2px rgba(255,196,0,0.8),
+    0 0 10px 3px rgba(255,196,0,0.4);
+}
+to{
+  box-shadow:
+    inset 0 6px 10px rgba(0,0,0,.9),
+    0 0 0 3px rgba(255,210,0,1),
+    0 0 22px 8px rgba(255,196,0,0.7);
 }
 }
 
