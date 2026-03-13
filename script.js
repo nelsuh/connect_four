@@ -463,6 +463,7 @@ function getBoardSnapshot() {
     current,
     gameOver,
     lastWinnerPlayer,
+    lastInsertedPos,
     winnerOverlayVisible: gameOver,
     rematchState,
     version: Date.now(),
@@ -537,7 +538,11 @@ function applyBoardSnapshot(snapshot) {
   lastWinnerPlayer = snapshot.lastWinnerPlayer === 2 ? 2 : (snapshot.lastWinnerPlayer === 1 ? 1 : 0);
   rematchState = ["idle", "requested"].includes(snapshot.rematchState) ? snapshot.rematchState : rematchState;
   pendingMove = false;
-  lastInsertedPos = null;
+  if (snapshot.lastInsertedPos && typeof snapshot.lastInsertedPos.r === "number") {
+    lastInsertedPos = snapshot.lastInsertedPos;
+  } else {
+    lastInsertedPos = null;
+  }
   winnerOverlay.classList.remove("show");
   renderBoard();
   if (gameOver && lastWinnerPlayer) {
