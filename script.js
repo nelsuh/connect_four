@@ -282,8 +282,11 @@ function hideWaiting() {
 }
 
 playBotBtn.addEventListener("click", () => {
+  // Bot interlude: stay in the room and keep `waitingForOpponent = true` so
+  // `onPlayerJoined` will purge this bot game and call `startOnlineGame()`
+  // the moment the friend arrives.
   isMultiplayer = false;
-  waitingForOpponent = false;
+  pendingMove = false;
   hideWaiting();
   syncControlVisibility();
   setPlayerDisplayBot();
