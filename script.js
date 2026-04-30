@@ -563,22 +563,24 @@ function applyBoardSnapshot(snapshot) {
 
 
 function animateDrop(col, targetRow, player, onDone) {
-  const cellSize = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--cell-size')) || 46;
-  const gap = 6;
-  const step = cellSize + gap;
-  const boardPad = 12;
+  const targetCell = boardEl.children[targetRow * COLS + col];
+  const boardRect = boardEl.getBoundingClientRect();
+  const cellRect = targetCell.getBoundingClientRect();
+  const cellSize = cellRect.width;
 
   const disk = document.createElement("div");
   disk.className = "drop-disk";
   disk.dataset.player = player;
 
-  const left = boardPad + col * step + (step - cellSize) / 2 + cellSize * 0.075;
+  const left = (cellRect.left - boardRect.left) + cellSize * 0.075;
   disk.style.width  = (cellSize * 0.85) + "px";
   disk.style.height = (cellSize * 0.85) + "px";
   disk.style.left   = left + "px";
 
-  const startTop = boardPad + (cellSize - cellSize * 0.85) / 2;
-  const endTop   = boardPad + targetRow * step + (cellSize - cellSize * 0.85) / 2;
+  const topCell = boardEl.children[col];
+  const topCellRect = topCell.getBoundingClientRect();
+  const startTop = (topCellRect.top - boardRect.top) + cellSize * 0.075;
+  const endTop   = (cellRect.top - boardRect.top) + cellSize * 0.075;
 
   disk.style.top = startTop + "px";
   boardEl.appendChild(disk);
