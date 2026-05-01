@@ -34,6 +34,16 @@
 
   <div id="board"></div>
 
+  <!-- Winner Banner (non-blocking, shows below board until rematch / exit) -->
+  <div id="winnerBanner" class="winner-banner" hidden>
+    <span class="winner-banner-emoji" id="winnerEmoji">🏆</span>
+    <span class="winner-banner-text"><strong id="winnerNameDisplay">Red</strong> wins!</span>
+    <div class="winner-banner-actions">
+      <button class="winner-btn" id="winnerPlayAgain">Rematch</button>
+      <button class="winner-btn winner-btn-share" id="winnerShare">Share</button>
+    </div>
+  </div>
+
   <div class="controls">
 
     <select id="difficulty">
@@ -54,20 +64,6 @@
     <div class="waiting-spinner"></div>
     <p class="waiting-text">Waiting for opponent…</p>
     <button class="waiting-bot-btn" id="playBotBtn">Play vs Bot instead</button>
-  </div>
-</div>
-
-<!-- Winner Overlay -->
-<div id="winnerOverlay">
-  <div class="winner-card" id="winnerCard">
-    <span class="winner-emoji" id="winnerEmoji">🏆</span>
-    <div class="winner-title">Winner</div>
-    <div class="winner-name" id="winnerNameDisplay">Red</div>
-    <div class="winner-sub">Connect 4 Champion!</div>
-    <div class="winner-actions">
-      <button class="winner-btn" id="winnerPlayAgain">Play Again</button>
-      <button class="winner-btn winner-btn-share" id="winnerShare">Share</button>
-    </div>
   </div>
 </div>
 

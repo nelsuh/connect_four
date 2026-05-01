@@ -26,12 +26,19 @@ const boardEl          = document.getElementById("board");
 const statusEl         = document.getElementById("status");
 const resetBtn         = document.getElementById("reset");
 const diffSelect       = document.getElementById("difficulty");
-const winnerOverlay    = document.getElementById("winnerOverlay");
+const winnerBanner     = document.getElementById("winnerBanner");
 const winnerNameDisplay= document.getElementById("winnerNameDisplay");
 const winnerEmoji      = document.getElementById("winnerEmoji");
-const winnerCard       = document.getElementById("winnerCard");
 const winnerPlayAgain  = document.getElementById("winnerPlayAgain");
 const winnerShare      = document.getElementById("winnerShare");
+
+function showWinnerBanner() {
+  if (winnerBanner) winnerBanner.hidden = false;
+}
+
+function hideWinnerBanner() {
+  if (winnerBanner) winnerBanner.hidden = true;
+}
 const waitingOverlay   = document.getElementById("waitingOverlay");
 const playBotBtn       = document.getElementById("playBotBtn");
 const player1Avatar    = document.getElementById("player1Avatar");
@@ -427,7 +434,7 @@ function resetForRematch() {
   rematchState = "idle";
   pendingMove = false;
   lastSnapshotVersion = 0;
-  winnerOverlay.classList.remove("show");
+  hideWinnerBanner();
   winnerPlayAgain.textContent = "Rematch";
   winnerPlayAgain.disabled = false;
   winnerPlayAgain.onclick = requestRematch;
@@ -447,7 +454,7 @@ function init() {
   rematchState = "idle";
   lastInsertedPos = null;
   winRecordedThisGame = false;
-  winnerOverlay.classList.remove("show");
+  hideWinnerBanner();
   renderBoard();
   updateStatus();
   updateWinCounts();
@@ -598,7 +605,7 @@ function showWinnerOverlay() {
   winnerNameDisplay.textContent = winnerName;
   winnerNameDisplay.style.color = color;
   winnerEmoji.textContent = lastWinnerPlayer === 1 ? "🔴" : "🟡";
-  winnerOverlay.classList.add("show");
+  showWinnerBanner();
   syncRematchUi();
 }
 
@@ -626,7 +633,7 @@ function applyBoardSnapshot(snapshot) {
   } else {
     lastInsertedPos = null;
   }
-  winnerOverlay.classList.remove("show");
+  hideWinnerBanner();
   renderBoard();
   if (gameOver && lastWinnerPlayer) {
     recordWin(lastWinnerPlayer);
@@ -642,9 +649,7 @@ function applyBoardSnapshot(snapshot) {
       ? playerLabelForStatus(winnerId, lastWinnerPlayer === 1 ? "Red" : "Yellow")
       : (lastWinnerPlayer === 1 ? "Red" : "Yellow");
     updateStatus("🎉 " + name + " wins!");
-    if (snapshot.winnerOverlayVisible !== false) {
-      showWinnerOverlay();
-    }
+    showWinnerOverlay();
   } else if (isFull()) {
     updateStatus("Draw!");
   } else {
@@ -733,8 +738,8 @@ function handleMove(col, local = true) {
           winnerNameDisplay.textContent = name;
           winnerNameDisplay.style.color = color;
           winnerEmoji.textContent = player === 1 ? "🔴" : "🟡";
+          showWinnerBanner();
           spawnConfetti();
-          winnerOverlay.classList.add("show");
 
           if (isMultiplayer) {
             rematchState = "idle";
@@ -743,7 +748,7 @@ function handleMove(col, local = true) {
             winnerPlayAgain.textContent = "Play Again";
             winnerPlayAgain.disabled = false;
             winnerPlayAgain.onclick = () => {
-              winnerOverlay.classList.remove("show");
+              hideWinnerBanner();
               init();
             };
           }
@@ -847,7 +852,7 @@ function spawnConfetti() {
     el.style.animationDelay = Math.random() * 0.8 + "s";
     el.style.animationDuration = (0.9 + Math.random() * 0.8) + "s";
     el.style.transform = `rotate(${Math.random()*360}deg)`;
-    winnerCard.appendChild(el);
+    winnerBanner.appendChild(el);
     el.addEventListener("animationend", () => el.remove());
   }
 }
