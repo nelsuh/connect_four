@@ -24,13 +24,11 @@ let rematchState = "idle"; // idle | requested
 // ── DOM refs ──────────────────────────────────────────────
 const boardEl          = document.getElementById("board");
 const statusEl         = document.getElementById("status");
-const resetBtn         = document.getElementById("reset");
 const diffSelect       = document.getElementById("difficulty");
 const winnerBanner     = document.getElementById("winnerBanner");
 const winnerNameDisplay= document.getElementById("winnerNameDisplay");
 const winnerEmoji      = document.getElementById("winnerEmoji");
 const winnerPlayAgain  = document.getElementById("winnerPlayAgain");
-const winnerShare      = document.getElementById("winnerShare");
 
 function showWinnerBanner() {
   if (winnerBanner) winnerBanner.hidden = false;
@@ -393,24 +391,6 @@ playBotBtn.addEventListener("click", () => {
 function syncControlVisibility() {
   diffSelect.style.display = isMultiplayer ? "none" : "";
 }
-
-resetBtn.addEventListener("click", () => {
-  if (isMultiplayer) {
-    requestRematch();
-  } else {
-    init();
-  }
-});
-
-winnerShare.addEventListener("click", () => {
-  const winnerText = winnerNameDisplay.textContent;
-  Usion.share({
-    contentType: "text",
-    text: `${winnerText} won at Connect 4! 🔴🟡`,
-    title: "Connect 4",
-    message: `${winnerText} won at Connect 4! 🔴🟡`
-  });
-});
 
 // ── Rematch ───────────────────────────────────────────────
 
