@@ -41,21 +41,86 @@ const player2Name      = document.getElementById("player2Name");
 const player1WinsEl    = document.querySelector("#player1Wins span");
 const player2WinsEl    = document.querySelector("#player2Wins span");
 
-// Per-session win counts indexed by player slot (1-based: [_, p1, p2])
+// All-time win counts vs the current opponent (multiplayer only),
+// indexed by player slot (1-based: [_, p1, p2]). Persisted in localStorage.
 const playerWins = [0, 0, 0];
 let winRecordedThisGame = false;
+
+const player1WinsRow = document.getElementById("player1Wins");
+const player2WinsRow = document.getElementById("player2Wins");
+
+function setWinsVisibility(visible) {
+  const display = visible ? "" : "none";
+  if (player1WinsRow) player1WinsRow.style.display = display;
+  if (player2WinsRow) player2WinsRow.style.display = display;
+}
 
 function updateWinCounts() {
   if (player1WinsEl) player1WinsEl.textContent = String(playerWins[1]);
   if (player2WinsEl) player2WinsEl.textContent = String(playerWins[2]);
 }
 
+function getOpponentId() {
+  if (!isMultiplayer || !Array.isArray(players) || players.length < 2) return null;
+  return players[0] === myId ? players[1] : players[0];
+}
+
+function storageKeyForOpponent(opponentId) {
+  return "c4:wins:" + opponentId;
+}
+
+function loadWinsForOpponent(opponentId) {
+  try {
+    const raw = localStorage.getItem(storageKeyForOpponent(opponentId));
+    if (!raw) return { mine: 0, theirs: 0 };
+    const parsed = JSON.parse(raw);
+    return {
+      mine: Math.max(0, Number(parsed.mine) || 0),
+      theirs: Math.max(0, Number(parsed.theirs) || 0),
+    };
+  } catch (_) {
+    return { mine: 0, theirs: 0 };
+  }
+}
+
+function saveWinsForOpponent(opponentId, mine, theirs) {
+  try {
+    localStorage.setItem(
+      storageKeyForOpponent(opponentId),
+      JSON.stringify({ mine, theirs })
+    );
+  } catch (_) { /* ignore quota / private mode */ }
+}
+
+function syncPlayerWinsFromStorage() {
+  if (!isMultiplayer) return;
+  const oppId = getOpponentId();
+  if (!oppId || !myPlayer) return;
+  const w = loadWinsForOpponent(oppId);
+  const mySlot = myPlayer;
+  const oppSlot = mySlot === 1 ? 2 : 1;
+  playerWins[mySlot] = w.mine;
+  playerWins[oppSlot] = w.theirs;
+  updateWinCounts();
+}
+
+function persistCurrentWins() {
+  if (!isMultiplayer) return;
+  const oppId = getOpponentId();
+  if (!oppId || !myPlayer) return;
+  const mySlot = myPlayer;
+  const oppSlot = mySlot === 1 ? 2 : 1;
+  saveWinsForOpponent(oppId, playerWins[mySlot], playerWins[oppSlot]);
+}
+
 function recordWin(playerSlot) {
   if (winRecordedThisGame) return;
   if (playerSlot !== 1 && playerSlot !== 2) return;
+  if (!isMultiplayer) return; // bot games don't count
   playerWins[playerSlot] += 1;
   winRecordedThisGame = true;
   updateWinCounts();
+  persistCurrentWins();
 }
 
 // ── Usion Init ────────────────────────────────────────────
@@ -259,6 +324,8 @@ function startOnlineGame() {
   myPlayer = players.indexOf(myId) + 1; // 1 or 2
 
   updatePlayerDisplay();
+  setWinsVisibility(true);
+  syncPlayerWinsFromStorage();
   hideWaiting();
   syncControlVisibility();
   init();
@@ -288,6 +355,7 @@ function setPlayerDisplayBot() {
   player2Name.textContent = "Bot";
   if (playerAvatars[myId]) player1Avatar.src = playerAvatars[myId];
   player2Avatar.src = "https://api.dicebear.com/7.x/bottts/svg?seed=bot";
+  setWinsVisibility(false);
 }
 
 // ── Waiting overlay ───────────────────────────────────────
@@ -903,4 +971,5 @@ function minimax(b, depth, alpha, beta, maximizing) {
 }
 
 // ── Boot ──────────────────────────────────────────────────
+setWinsVisibility(false);
 syncControlVisibility();
