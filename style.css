@@ -69,6 +69,27 @@ border-radius:50%;
 background:white;
 }
 
+.player .name{
+font-weight:600;
+font-size:13px;
+margin-top:4px;
+}
+
+.player .wins{
+font-size:11px;
+opacity:.75;
+margin-top:2px;
+letter-spacing:.3px;
+}
+
+.player .wins span{
+font-weight:800;
+opacity:1;
+}
+
+.player.left .wins span{ color:#ff7a7a; }
+.player.right .wins span{ color:#ffe27a; }
+
 .vs{
 
 font-weight:700;

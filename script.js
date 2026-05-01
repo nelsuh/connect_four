@@ -38,6 +38,25 @@ const player1Avatar    = document.getElementById("player1Avatar");
 const player2Avatar    = document.getElementById("player2Avatar");
 const player1Name      = document.getElementById("player1Name");
 const player2Name      = document.getElementById("player2Name");
+const player1WinsEl    = document.querySelector("#player1Wins span");
+const player2WinsEl    = document.querySelector("#player2Wins span");
+
+// Per-session win counts indexed by player slot (1-based: [_, p1, p2])
+const playerWins = [0, 0, 0];
+let winRecordedThisGame = false;
+
+function updateWinCounts() {
+  if (player1WinsEl) player1WinsEl.textContent = String(playerWins[1]);
+  if (player2WinsEl) player2WinsEl.textContent = String(playerWins[2]);
+}
+
+function recordWin(playerSlot) {
+  if (winRecordedThisGame) return;
+  if (playerSlot !== 1 && playerSlot !== 2) return;
+  playerWins[playerSlot] += 1;
+  winRecordedThisGame = true;
+  updateWinCounts();
+}
 
 // ── Usion Init ────────────────────────────────────────────
 
@@ -177,6 +196,7 @@ function onSync(data) {
         if (checkWin(r, col, current)) {
           gameOver = true;
           lastWinnerPlayer = current;
+          recordWin(current);
           renderBoard();
           highlightWinner(r, col, current);
 
@@ -358,9 +378,11 @@ function init() {
   lastSnapshotVersion = 0;
   rematchState = "idle";
   lastInsertedPos = null;
+  winRecordedThisGame = false;
   winnerOverlay.classList.remove("show");
   renderBoard();
   updateStatus();
+  updateWinCounts();
 }
 
 
@@ -539,6 +561,7 @@ function applyBoardSnapshot(snapshot) {
   winnerOverlay.classList.remove("show");
   renderBoard();
   if (gameOver && lastWinnerPlayer) {
+    recordWin(lastWinnerPlayer);
     const cells = findWinningCells(lastWinnerPlayer);
     if (cells.length >= 4) {
       for (const [row, col] of cells) {
@@ -619,6 +642,7 @@ function handleMove(col, local = true) {
     if (isWin) {
       gameOver = true;
       lastWinnerPlayer = current;
+      recordWin(current);
     } else if (isDraw) {
       gameOver = true;
     }
