@@ -128,12 +128,101 @@ function recordWin(playerSlot) {
   persistCurrentWins();
 }
 
+// ── Usion capabilities: cloud stats · leaderboard · notify · checkpoint ──
+// All wrappers are defensive: missing modules / standalone preview must never
+// throw (a thrown error in init blanks the game). They no-op gracefully.
+
+let myStats = { wins: 0, losses: 0, draws: 0, games: 0 };
+let statsRecordedThisGame = false;
+let lastTurnNotified = false;
+const STATS_KEY = "c4:stats";
+
+function isHostPlayer() {
+  return isMultiplayer && Array.isArray(players) && players.length > 0 && players[0] === myId;
+}
+
+// Cross-device stats: prefer Cloud KV, fall back to localStorage cache.
+async function loadStats() {
+  try {
+    if (window.Usion && Usion.cloud) {
+      const remote = await Usion.cloud.get(STATS_KEY);
+      if (remote && typeof remote === "object") {
+        myStats = Object.assign(myStats, remote);
+        try { localStorage.setItem(STATS_KEY, JSON.stringify(myStats)); } catch (_) {}
+        return;
+      }
+    }
+  } catch (_) {}
+  try {
+    const raw = localStorage.getItem(STATS_KEY);
+    if (raw) myStats = Object.assign(myStats, JSON.parse(raw));
+  } catch (_) {}
+}
+
+function persistStats() {
+  try { localStorage.setItem(STATS_KEY, JSON.stringify(myStats)); } catch (_) {}
+  try { if (window.Usion && Usion.cloud) Usion.cloud.set(STATS_KEY, myStats); } catch (_) {}
+}
+
+function submitLeaderboard() {
+  try {
+    if (window.Usion && Usion.leaderboard) {
+      // Score = total wins; ranked highest-first. (Needs leaderboard.enabled on the service.)
+      Usion.leaderboard.submit(myStats.wins, { games: myStats.games, draws: myStats.draws });
+    }
+  } catch (_) {}
+}
+
+function notifySelf(title, body) {
+  // Only fires when the app is backgrounded (banner if online elsewhere, OS push if offline).
+  try { if (window.Usion && Usion.notify && document.hidden) Usion.notify.send({ title, body }); } catch (_) {}
+}
+
+// Record MY outcome exactly once per multiplayer game (idempotent across replay).
+function recordOutcome(winnerPlayer) {
+  if (statsRecordedThisGame || !isMultiplayer) return;
+  statsRecordedThisGame = true;
+  myStats.games += 1;
+  if (!winnerPlayer) {
+    myStats.draws += 1;
+  } else if (winnerPlayer === myPlayer) {
+    myStats.wins += 1;
+    notifySelf("You won! 🎉", "You won your Connect Four match");
+  } else {
+    myStats.losses += 1;
+    notifySelf("Match over", "Your Connect Four match ended");
+  }
+  persistStats();
+  submitLeaderboard();
+  try { if (window.Usion && Usion.cloud && Usion.cloud.shared) Usion.cloud.shared.incr("games_total", 1); } catch (_) {}
+}
+
+function maybeNotifyTurn() {
+  if (!isMultiplayer || gameOver) { lastTurnNotified = false; return; }
+  const myTurn = current === myPlayer;
+  if (myTurn && document.hidden && !lastTurnNotified) {
+    lastTurnNotified = true;
+    notifySelf("Your turn", "It's your move in Connect Four");
+  }
+  if (!myTurn) lastTurnNotified = false;
+}
+
+// Host (playerIds[0]) checkpoints authoritative state so reconnecting clients
+// receive it as game_state instead of replaying from zero.
+function hostCheckpoint() {
+  if (!isHostPlayer()) return;
+  try {
+    if (window.Usion && Usion.game && Usion.game.setState) Usion.game.setState(getBoardSnapshot());
+  } catch (_) {}
+}
+
 // ── Usion Init ────────────────────────────────────────────
 
 Usion.init(async function(config) {
   myId = config.userId;
   playerNames[myId] = config.userName || "You";
   if (config.userAvatar) playerAvatars[myId] = config.userAvatar;
+  loadStats(); // fire-and-forget; never block init/render
 
   if (config.roomId) {
     showWaiting();
@@ -231,6 +320,7 @@ function onPlayerLeft(data) {
   connectedCount = Math.max(0, connectedCount - 1);
   if (!gameOver) {
     updateStatus("Opponent left the game");
+    notifySelf("Opponent left", "Your opponent left the Connect Four match");
   }
 }
 
@@ -267,6 +357,7 @@ function onSync(data) {
           gameOver = true;
           lastWinnerPlayer = current;
           recordWin(current);
+          recordOutcome(current);
           renderBoard();
           highlightWinner(r, col, current);
 
@@ -434,6 +525,8 @@ function init() {
   rematchState = "idle";
   lastInsertedPos = null;
   winRecordedThisGame = false;
+  statsRecordedThisGame = false;
+  lastTurnNotified = false;
   hideWinnerBanner();
   renderBoard();
   updateStatus();
@@ -468,6 +561,7 @@ function playerLabelForStatus(playerId, fallback) {
 }
 
 function updateStatus(text) {
+  maybeNotifyTurn();
   if (text) { statusEl.textContent = text; return; }
 
   if (isMultiplayer) {
@@ -615,8 +709,10 @@ function applyBoardSnapshot(snapshot) {
   }
   hideWinnerBanner();
   renderBoard();
+  if (isMultiplayer) hostCheckpoint();
   if (gameOver && lastWinnerPlayer) {
     recordWin(lastWinnerPlayer);
+    recordOutcome(lastWinnerPlayer);
     const cells = findWinningCells(lastWinnerPlayer);
     if (cells.length >= 4) {
       for (const [row, col] of cells) {
@@ -631,6 +727,7 @@ function applyBoardSnapshot(snapshot) {
     updateStatus("🎉 " + name + " wins!");
     showWinnerOverlay();
   } else if (isFull()) {
+    recordOutcome(0);
     updateStatus("Draw!");
   } else {
     updateStatus();
@@ -696,9 +793,12 @@ function handleMove(col, local = true) {
       gameOver = true;
       lastWinnerPlayer = current;
       recordWin(current);
+      recordOutcome(current);
     } else if (isDraw) {
       gameOver = true;
+      recordOutcome(0);
     }
+    if (isMultiplayer) hostCheckpoint();
 
     animateDrop(col, r, player, () => {
       renderBoard();
