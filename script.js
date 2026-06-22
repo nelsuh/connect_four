@@ -19,6 +19,10 @@ let lastSequence = 0; // Track last processed action sequence
 let connectedCount = 0; // Live socket joins, not just authorized participants
 let pendingMove = false; // Wait for server echo before allowing another multiplayer move
 let lastSnapshotVersion = 0; // Ignore stale realtime board snapshots
+// Highest snapshot version seen *per sender*. Snapshots are stamped with the
+// sender's own Date.now(), which is only monotonic for that one client — never
+// compare versions across two devices' clocks (skew silently drops valid moves).
+let lastSnapshotVersionByPlayer = {};
 let rematchState = "idle"; // idle | requested
 
 // ── DOM refs ──────────────────────────────────────────────
@@ -388,7 +392,7 @@ function onRealtime(data) {
 
   if (data.action_type === "board_state" && data.action_data) {
     if (data.player_id === myId) return;
-    applyBoardSnapshot(data.action_data);
+    applyBoardSnapshot(data.action_data, data.player_id);
     return;
   }
 
@@ -522,6 +526,7 @@ function init() {
   pendingMove = false;
   lastWinnerPlayer = 0;
   lastSnapshotVersion = 0;
+  lastSnapshotVersionByPlayer = {};
   rematchState = "idle";
   lastInsertedPos = null;
   winRecordedThisGame = false;
@@ -690,9 +695,14 @@ function applyRematchState(payload) {
   syncRematchUi();
 }
 
-function applyBoardSnapshot(snapshot) {
+function applyBoardSnapshot(snapshot, senderId) {
   const version = Number(snapshot.version || 0);
-  if (version && version < lastSnapshotVersion) return;
+  // Order snapshots per-sender: each sender's own clock is monotonic, so this
+  // drops only genuinely out-of-order packets from THAT player. Comparing across
+  // two devices' clocks (skew) used to drop valid moves and deadlock the game.
+  const prevFromSender = lastSnapshotVersionByPlayer[senderId] || 0;
+  if (version && version < prevFromSender) return;
+  if (senderId) lastSnapshotVersionByPlayer[senderId] = Math.max(prevFromSender, version);
   lastSnapshotVersion = Math.max(lastSnapshotVersion, version);
   if (Array.isArray(snapshot.board)) {
     board = snapshot.board.map((row) => Array.isArray(row) ? row.slice() : Array(COLS).fill(0));
