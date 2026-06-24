@@ -416,6 +416,60 @@ function onAction(data) {
   }
 }
 
+function discCount(b) {
+  let n = 0;
+  for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) if (b[r][c]) n++;
+  return n;
+}
+
+// Drop the current player's disc into `col` on the GLOBAL board, advancing the
+// turn and detecting win/draw exactly like a live move but without animation.
+// Returns true if the game just ended (caller should stop replaying).
+function replayMoveSilent(col) {
+  for (let r = ROWS - 1; r >= 0; r--) {
+    if (board[r][col] !== 0) continue;
+    board[r][col] = current;
+    lastInsertedPos = { r, c: col };
+    if (checkWin(r, col, current)) {
+      gameOver = true;
+      lastWinnerPlayer = current;
+      recordWin(current);
+      recordOutcome(current);
+      return true;
+    }
+    if (isFull()) {
+      gameOver = true;
+      recordOutcome(0);
+      return true;
+    }
+    current = current === 1 ? 2 : 1;
+    return false;
+  }
+  return false; // column full / invalid — skip
+}
+
+function finalizeSyncRender() {
+  renderBoard();
+  if (gameOver && lastWinnerPlayer) {
+    const cells = findWinningCells(lastWinnerPlayer);
+    for (const [row, col] of cells) {
+      const el = boardEl.children[row * COLS + col];
+      if (el) el.classList.add("winner");
+    }
+    const winnerId = isMultiplayer ? players[lastWinnerPlayer - 1] : null;
+    const name = isMultiplayer
+      ? playerLabelForStatus(winnerId, lastWinnerPlayer === 1 ? "Red" : "Yellow")
+      : (lastWinnerPlayer === 1 ? "Red" : "Yellow");
+    updateStatus("🎉 " + name + " wins!");
+    showWinnerOverlay();
+  } else if (gameOver) {
+    updateStatus("Draw!");
+  } else {
+    updateStatus();
+  }
+  if (isMultiplayer) hostCheckpoint();
+}
+
 function onSync(data) {
   Usion.log("onSync: actions=" + (data.actions ? data.actions.length : 0) + " seq=" + data.sequence + " checkpoint=" + !!(data.game_state && data.game_state.board));
   pendingMove = false;
@@ -424,52 +478,39 @@ function onSync(data) {
     lastSequence = data.sequence;
   }
 
-  // The host checkpoints authoritative state after every move (hostCheckpoint →
-  // setState), which compacts the action log. So a sync may carry game_state
-  // alone. The checkpoint is always at least as fresh as the action log, so when
-  // present it is authoritative — apply it and skip the from-zero action replay.
-  if (data.game_state && Array.isArray(data.game_state.board)) {
-    applyCheckpoint(data.game_state);
+  const moveActions = (data.actions || []).filter(
+    (a) => a.action_type === "move" && a.action_data && a.action_data.col !== undefined
+  );
+  const cp = (data.game_state && Array.isArray(data.game_state.board)) ? data.game_state : null;
+  if (!cp && moveActions.length === 0) return; // nothing to rebuild from
+
+  // The action log is the complete, authoritative move history; the host-written
+  // checkpoint can LAG it (a non-host move made while the host was away lives only
+  // in the log). So trust the log and only fall back to the checkpoint when the log
+  // was actually compacted — i.e. it carries fewer moves than the checkpoint, in
+  // which case the missing prefix is in the checkpoint and the log is the tail.
+  const cpDiscs = cp ? discCount(cp.board) : -1;
+  if (cp && cpDiscs > moveActions.length) {
+    applyCheckpoint(cp);                                   // checkpoint = base (the compacted-away prefix)
+    for (const a of moveActions) {                          // log = post-checkpoint tail
+      if (replayMoveSilent(a.action_data.col)) break;
+    }
+    finalizeSyncRender();
     return;
   }
 
-  if (!data.actions || data.actions.length === 0) return;
-
-  // Replay all missed actions from the beginning
+  // Authoritative full replay from an empty board. This is what fixes the
+  // stale-checkpoint deadlock: every move (including the opponent's last one) is
+  // in the log, so `current` always reflects whose turn it really is.
   board = Array.from({ length: ROWS }, () => Array(COLS).fill(0));
   current = 1;
   gameOver = false;
-
-  for (const action of data.actions) {
-    if (action.action_type === "move" && action.action_data && action.action_data.col !== undefined) {
-      // Replay the move silently
-      const col = action.action_data.col;
-      for (let r = ROWS - 1; r >= 0; r--) {
-        if (board[r][col] !== 0) continue;
-        board[r][col] = current;
-        if (checkWin(r, col, current)) {
-          gameOver = true;
-          lastWinnerPlayer = current;
-          recordWin(current);
-          recordOutcome(current);
-          renderBoard();
-          highlightWinner(r, col, current);
-
-          const winnerId = isMultiplayer ? players[current - 1] : null;
-          const winnerIsMe = !isMultiplayer || winnerId === myId;
-          const name = isMultiplayer
-            ? (winnerIsMe ? "You" : (playerNames[winnerId] || "Opponent"))
-            : (current === 1 ? "Red" : "Yellow");
-          updateStatus("🎉 " + name + " wins!");
-          return;
-        }
-        current = current === 1 ? 2 : 1;
-        break;
-      }
-    }
+  lastWinnerPlayer = 0;
+  lastInsertedPos = null;
+  for (const a of moveActions) {
+    if (replayMoveSilent(a.action_data.col)) break;
   }
-  renderBoard();
-  updateStatus();
+  finalizeSyncRender();
 }
 
 function onRealtime(data) {
@@ -659,6 +700,9 @@ function playerLabelForStatus(playerId, fallback) {
 function updateStatus(text) {
   maybeNotifyTurn();
   if (text) { statusEl.textContent = text; return; }
+  // While the opponent is gone, the grace countdown owns the status line — don't
+  // let a stray resync overwrite the "paused / waiting to rejoin" message.
+  if (forfeitTimer && !gameOver) return;
 
   if (isMultiplayer) {
     if (gameOver) {
@@ -693,7 +737,8 @@ boardEl.addEventListener("click", (e) => {
   const col = Number(cell.dataset.col);
 
   if (isMultiplayer) {
-    if (connectionPaused) return; // paused while offline; wait for resync
+    if (connectionPaused) return;  // paused while OUR socket is offline; wait for resync
+    if (forfeitTimer) return;      // paused while the opponent is gone (grace countdown running)
     if (current !== myPlayer || pendingMove) return;
     pendingMove = true;
     const applied = handleMove(col, true);
