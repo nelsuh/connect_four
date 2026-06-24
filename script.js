@@ -24,6 +24,9 @@ let lastSnapshotVersion = 0; // Ignore stale realtime board snapshots
 // compare versions across two devices' clocks (skew silently drops valid moves).
 let lastSnapshotVersionByPlayer = {};
 let rematchState = "idle"; // idle | requested
+let connectionPaused = false; // true while our socket is disconnected (block input)
+let forfeitTimer = null;      // 20s grace countdown when the opponent leaves mid-game
+const FORFEIT_GRACE_MS = 20000;
 
 // ── DOM refs ──────────────────────────────────────────────
 const boardEl          = document.getElementById("board");
@@ -226,6 +229,7 @@ Usion.init(async function(config) {
   myId = config.userId;
   playerNames[myId] = config.userName || "You";
   if (config.userAvatar) playerAvatars[myId] = config.userAvatar;
+  if (config.playerIds) players = config.playerIds.slice(); // platform-provided roster (playerIds[0] = host)
   loadStats(); // fire-and-forget; never block init/render
 
   if (config.roomId) {
@@ -254,14 +258,17 @@ async function setupMultiplayer(roomId) {
     Usion.game.onRematchRequest(onRematchRequest);
     Usion.game.onGameRestarted(onGameRestarted);
     Usion.game.onDisconnect(() => {
+      // Real pause: block our own input until we're back online (we can't trust
+      // local state while disconnected — the opponent may have moved).
+      connectionPaused = true;
+      pendingMove = false;
       if (!gameOver) updateStatus("Connection lost…");
     });
     Usion.game.onReconnect(() => {
-      if (!gameOver) {
-        updateStatus();
-        // Re-sync on reconnect to catch missed actions
-        Usion.game.requestSync(lastSequence);
-      }
+      connectionPaused = false;
+      // Re-sync on reconnect to catch missed actions / the host checkpoint.
+      Usion.game.requestSync(0);
+      if (!gameOver) updateStatus();
     });
 
     await Usion.game.join(roomId);
@@ -315,16 +322,64 @@ function onPlayerJoined(data) {
     name: playerNames[myId],
     avatar: playerAvatars[myId] || null
   });
+  // Opponent came back during the forfeit grace window → cancel and resync.
+  if (connectedCount >= 2 && forfeitTimer) {
+    clearForfeitGrace();
+    if (!gameOver) { updateStatus(); Usion.game.requestSync(0); }
+  }
   if (connectedCount >= 2 && waitingForOpponent) {
     startOnlineGame();
   }
 }
 
+// ── Forfeit grace period ──────────────────────────────────
+// When the opponent leaves mid-game, defer the result for a grace window so a
+// quick rejoin resumes the game untouched. If they don't return, the remaining
+// player wins by forfeit. (Mirrors 13 / mini_golf.)
+function clearForfeitGrace() {
+  if (forfeitTimer) { clearInterval(forfeitTimer); forfeitTimer = null; }
+}
+
+function startForfeitGrace() {
+  if (forfeitTimer) clearInterval(forfeitTimer);
+  let secs = Math.ceil(FORFEIT_GRACE_MS / 1000);
+  updateStatus("Opponent left — waiting to rejoin… (" + secs + "s)");
+  forfeitTimer = setInterval(() => {
+    if (gameOver || connectedCount > 1) { // resolved or opponent returned
+      clearForfeitGrace();
+      if (!gameOver) updateStatus();
+      return;
+    }
+    secs -= 1;
+    if (secs > 0) {
+      updateStatus("Opponent left — waiting to rejoin… (" + secs + "s)");
+      return;
+    }
+    clearForfeitGrace();
+    forfeitToMe();
+  }, 1000);
+}
+
+function forfeitToMe() {
+  if (gameOver || !isMultiplayer || !myPlayer) return;
+  gameOver = true;
+  lastWinnerPlayer = myPlayer;
+  recordWin(myPlayer);
+  recordOutcome(myPlayer);
+  updateStatus("🎉 You win! (opponent left)");
+  showWinnerOverlay();
+}
+
 function onPlayerLeft(data) {
   connectedCount = Math.max(0, connectedCount - 1);
-  if (!gameOver) {
+  if (gameOver) return;
+  notifySelf("Opponent left", "Your opponent left the Connect Four match");
+  if (isMultiplayer && myPlayer && connectedCount <= 1) {
+    // Decisive: only we remain. Hold a grace window before declaring forfeit so
+    // a quick rejoin resumes the game exactly where it was.
+    startForfeitGrace();
+  } else {
     updateStatus("Opponent left the game");
-    notifySelf("Opponent left", "Your opponent left the Connect Four match");
   }
 }
 
@@ -337,13 +392,23 @@ function onAction(data) {
 }
 
 function onSync(data) {
-  Usion.log("onSync: actions=" + (data.actions ? data.actions.length : 0) + " seq=" + data.sequence);
+  Usion.log("onSync: actions=" + (data.actions ? data.actions.length : 0) + " seq=" + data.sequence + " checkpoint=" + !!(data.game_state && data.game_state.board));
   pendingMove = false;
   if (data.sequence !== undefined) {
     lastSnapshotVersion = Math.max(lastSnapshotVersion, Number(data.sequence) || 0);
+    lastSequence = data.sequence;
   }
+
+  // The host checkpoints authoritative state after every move (hostCheckpoint →
+  // setState), which compacts the action log. So a sync may carry game_state
+  // alone. The checkpoint is always at least as fresh as the action log, so when
+  // present it is authoritative — apply it and skip the from-zero action replay.
+  if (data.game_state && Array.isArray(data.game_state.board)) {
+    applyCheckpoint(data.game_state);
+    return;
+  }
+
   if (!data.actions || data.actions.length === 0) return;
-  if (data.sequence !== undefined) lastSequence = data.sequence;
 
   // Replay all missed actions from the beginning
   board = Array.from({ length: ROWS }, () => Array(COLS).fill(0));
@@ -532,6 +597,7 @@ function init() {
   winRecordedThisGame = false;
   statsRecordedThisGame = false;
   lastTurnNotified = false;
+  clearForfeitGrace();
   hideWinnerBanner();
   renderBoard();
   updateStatus();
@@ -602,6 +668,7 @@ boardEl.addEventListener("click", (e) => {
   const col = Number(cell.dataset.col);
 
   if (isMultiplayer) {
+    if (connectionPaused) return; // paused while offline; wait for resync
     if (current !== myPlayer || pendingMove) return;
     pendingMove = true;
     const applied = handleMove(col, true);
@@ -693,6 +760,16 @@ function applyRematchState(payload) {
   if (!["idle", "requested"].includes(nextState)) return;
   rematchState = nextState;
   syncRematchUi();
+}
+
+// Rebuild the board from a host checkpoint delivered as game_state on join/sync.
+// The checkpoint shape is a board snapshot (see getBoardSnapshot), so reuse the
+// same apply path used for realtime snapshots. Returns true if applied.
+function applyCheckpoint(state) {
+  if (!state || typeof state !== "object" || !Array.isArray(state.board)) return false;
+  isMultiplayer = true;
+  applyBoardSnapshot(state, players[0] || "host");
+  return true;
 }
 
 function applyBoardSnapshot(snapshot, senderId) {
