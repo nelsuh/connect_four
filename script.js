@@ -8,7 +8,13 @@ let gameOver = false;
 // ── Multiplayer state ─────────────────────────────────────
 let myId = null;
 let myPlayer = 0;     // 1 or 2 (determined by join order)
-let players = [];     // [p1_id, p2_id] in join order
+let players = [];     // [p1_id, p2_id] — the seat order (player 1 = Red, player 2 = Yellow)
+// The single canonical seat order, identical on every device and stable across
+// reconnects. Seeded from config.playerIds (the platform roster) when available,
+// otherwise from the host's checkpoint `order`. Slot assignment (myPlayer / host)
+// must NEVER be re-derived from a per-client server ordering, or two clients can
+// disagree on whose turn it is and deadlock (each thinks it's the opponent's move).
+let canonicalRoster = null;
 let playerNames = {};
 let playerAvatars = {};
 let isMultiplayer = false;
@@ -229,7 +235,10 @@ Usion.init(async function(config) {
   myId = config.userId;
   playerNames[myId] = config.userName || "You";
   if (config.userAvatar) playerAvatars[myId] = config.userAvatar;
-  if (config.playerIds) players = config.playerIds.slice(); // platform-provided roster (playerIds[0] = host)
+  if (config.playerIds && config.playerIds.length) {
+    canonicalRoster = config.playerIds.slice(); // platform roster — identical on every device, stable across reconnects
+    players = canonicalRoster.slice();
+  }
   loadStats(); // fire-and-forget; never block init/render
 
   if (config.roomId) {
@@ -281,6 +290,21 @@ async function setupMultiplayer(roomId) {
   }
 }
 
+// Reconcile the server's id list into `players` WITHOUT disturbing the canonical
+// seat order. When we have a canonical roster (config / checkpoint), we keep that
+// order and only append ids we hadn't seen; otherwise we adopt the server order
+// (first join only). This is what keeps player 1/2 — and therefore myPlayer and
+// whose-turn-it-is — identical on both devices across reconnects.
+function reconcilePlayers(idsFromServer) {
+  const ids = Array.isArray(idsFromServer) ? idsFromServer.filter(Boolean) : [];
+  if (canonicalRoster && canonicalRoster.length) {
+    players = canonicalRoster.slice();
+    ids.forEach((id) => { if (!players.includes(id)) players.push(id); });
+  } else if (ids.length) {
+    players = ids.slice();
+  }
+}
+
 function onJoined(data) {
   Usion.log("onJoined: " + JSON.stringify({
     player_ids: data.player_ids,
@@ -288,7 +312,7 @@ function onJoined(data) {
     status: data.status,
     connected_count: data.connected_count
   }));
-  players = data.player_ids || [];
+  reconcilePlayers(data.player_ids);
   connectedCount = Number(data.connected_count || 0);
   if (data.sequence !== undefined) lastSequence = data.sequence;
 
@@ -308,9 +332,10 @@ function onPlayerJoined(data) {
     player_ids: data.player_ids,
     player: data.player
   }));
-  // Use the full player_ids array from the server (data.player_id doesn't exist)
+  // Reconcile into the canonical seat order (never blindly adopt the server's
+  // per-client ordering — that's what made the two devices disagree on turns).
   if (data.player_ids) {
-    players = data.player_ids;
+    reconcilePlayers(data.player_ids);
   } else if (data.player && data.player.id && !players.includes(data.player.id)) {
     players.push(data.player.id);
   }
@@ -702,6 +727,7 @@ function getBoardSnapshot() {
     lastInsertedPos,
     winnerOverlayVisible: gameOver,
     rematchState,
+    order: players.slice(), // authoritative seat order, so a rejoiner restores the same player 1/2 mapping
     version: Date.now(),
   };
 }
@@ -768,7 +794,7 @@ function applyRematchState(payload) {
 function applyCheckpoint(state) {
   if (!state || typeof state !== "object" || !Array.isArray(state.board)) return false;
   isMultiplayer = true;
-  applyBoardSnapshot(state, players[0] || "host");
+  applyBoardSnapshot(state, state.order && state.order[0] ? state.order[0] : (players[0] || "host"));
   return true;
 }
 
@@ -781,6 +807,14 @@ function applyBoardSnapshot(snapshot, senderId) {
   if (version && version < prevFromSender) return;
   if (senderId) lastSnapshotVersionByPlayer[senderId] = Math.max(prevFromSender, version);
   lastSnapshotVersion = Math.max(lastSnapshotVersion, version);
+  // Adopt the sender's authoritative seat order so player 1/2 — and therefore
+  // myPlayer and whose-turn — stay identical on both devices. A canonical roster
+  // (config.playerIds) already pins this; the snapshot order covers the rest and
+  // self-heals a client whose order diverged after a reconnect (the deadlock fix).
+  if (!(canonicalRoster && canonicalRoster.length) && Array.isArray(snapshot.order) && snapshot.order.length >= 2) {
+    players = snapshot.order.slice();
+    if (myId) myPlayer = players.indexOf(myId) + 1;
+  }
   if (Array.isArray(snapshot.board)) {
     board = snapshot.board.map((row) => Array.isArray(row) ? row.slice() : Array(COLS).fill(0));
   }
