@@ -324,6 +324,11 @@ function onJoined(data) {
 
   if (connectedCount >= 2 && waitingForOpponent) {
     startOnlineGame();
+  } else if (waitingForOpponent && data.game_state && Array.isArray(data.game_state.board)) {
+    // A host checkpoint in the join ack means a match is already underway — rejoin
+    // it even if the live connected_count momentarily reads 1 (opponent not yet
+    // counted). startOnlineGame → requestSync(0) → onSync rebuilds from it.
+    startOnlineGame();
   }
 }
 
@@ -339,9 +344,11 @@ function onPlayerJoined(data) {
   } else if (data.player && data.player.id && !players.includes(data.player.id)) {
     players.push(data.player.id);
   }
-  if (data.player && data.player.is_connected) {
-    connectedCount = Math.max(connectedCount, 2);
-  }
+  // Presence from any signal the SDK gives us (don't depend solely on the
+  // possibly-absent nested is_connected, or forfeit-cancel can fail to fire).
+  if (typeof data.connected_count === "number") connectedCount = Math.max(connectedCount, data.connected_count);
+  if (Array.isArray(data.player_ids) && data.player_ids.length >= 2) connectedCount = Math.max(connectedCount, 2);
+  if (data.player && data.player.is_connected) connectedCount = Math.max(connectedCount, 2);
   // Re-broadcast our identity to the new joiner
   Usion.game.realtime("player_info", {
     name: playerNames[myId],
@@ -411,9 +418,19 @@ function onPlayerLeft(data) {
 function onAction(data) {
   Usion.log("onAction: type=" + data.action_type + " player=" + data.player_id + " myId=" + myId + " seq=" + data.sequence);
   if (data.sequence !== undefined) lastSequence = Math.max(lastSequence, data.sequence);
-  if (data.action_type === "move" && data.player_id === myId) {
-    pendingMove = false;
-  }
+  if (data.action_type !== "move") return;
+  if (data.player_id === myId) { pendingMove = false; return; }
+  // Apply the opponent's move from the DURABLE action channel. Previously moves
+  // were only applied via the fire-and-forget realtime "board_state" snapshot, so
+  // a single dropped packet silently desynced the two boards with no recovery
+  // until a reconnect. The realtime snapshot is now just a fast redundant path:
+  // the turn guard below makes applying from either channel idempotent — once a
+  // move advances the turn to me, the duplicate from the other channel is skipped.
+  if (gameOver || !isMultiplayer) return;
+  const col = data.action_data && data.action_data.col;
+  if (typeof col !== "number") return;
+  if (current === myPlayer) return;        // already applied (via board_state) → skip
+  handleMove(col, false);                  // animate, advance turn, detect win/draw
 }
 
 function discCount(b) {
