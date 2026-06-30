@@ -290,6 +290,43 @@ async function setupMultiplayer(roomId) {
   }
 }
 
+// ── Foreground catch-up ───────────────────────────────────
+// A backgrounded WebView is suspended and can miss the live `move` actions the
+// host relays during the gap. RN WebViews do NOT fire `visibilitychange` on app
+// background/foreground, and a quick (<3s) app-switch never trips a socket
+// reconnect — so without this a player who switches apps mid-game returns to a
+// stale board with no recovery. On every return to the foreground pull a fresh
+// sync; onSync rebuilds authoritatively from the action log, so an extra sync is
+// a harmless no-op. (>3s backgrounds are also covered by onReconnect.)
+function foregroundResync() {
+  if (!isMultiplayer || gameOver) return;
+  connectionPaused = false;
+  try { if (window.Usion && Usion.game && Usion.game.requestSync) Usion.game.requestSync(0); } catch (_) {}
+  if (!gameOver) updateStatus();
+}
+// Web fires visibilitychange on tab refocus — use it there.
+if (typeof document !== "undefined" && document.addEventListener) {
+  document.addEventListener("visibilitychange", function () {
+    if (document.visibilityState === "visible") foregroundResync();
+  });
+}
+// Mobile: RN WebViews don't fire visibilitychange on app foreground, so detect
+// the resume from a wall-clock jump (our JS was frozen while backgrounded) and
+// pull a sync — retrying a few times while the host socket finishes reconnecting.
+(function resumeWatchdog() {
+  var lastBeat = Date.now();
+  setInterval(function () {
+    var now = Date.now();
+    var gap = now - lastBeat;
+    lastBeat = now;
+    if (gap > 3000 && isMultiplayer && !gameOver) {
+      foregroundResync();
+      setTimeout(foregroundResync, 1500);
+      setTimeout(foregroundResync, 3500);
+    }
+  }, 1000);
+})();
+
 // Reconcile the server's id list into `players` WITHOUT disturbing the canonical
 // seat order. When we have a canonical roster (config / checkpoint), we keep that
 // order and only append ids we hadn't seen; otherwise we adopt the server order
