@@ -24,11 +24,18 @@ let lastWinnerPlayer = 0;
 let lastSequence = 0; // Track last processed action sequence
 let connectedCount = 0; // Live socket joins, not just authorized participants
 let pendingMove = false; // Wait for server echo before allowing another multiplayer move
-let lastAppliedSeq = 0; // Highest server move-sequence already reflected in `board`.
-// Every move is applied exactly once, keyed by this monotonic server sequence. This
-// is what kills the "auto-insert on resume" bug: a move buffered/redelivered while we
-// were backgrounded (durable echo, or a redundant snapshot) is recognised as already
-// applied and skipped, instead of dropping a phantom disc into the next free slot.
+let lastAppliedSeq = 0; // Highest server move-sequence already reflected in `board` (secondary dedup).
+// PRIMARY dedup: the set of moveIds already reflected in `board`. Each move carries a
+// client-generated `moveId` in its action_data; the SDK preserves it verbatim through
+// the echo, the durable log, and resync — UNLIKE the server `sequence`, which we found
+// can arrive undefined on the mobile resume/redelivery path. When that happened, the
+// seq-only guard (`seq && seq <= lastAppliedSeq`) was skipped for seq=0, so a buffered
+// echo of our own last move dropped a SECOND disc on resume (the phantom "auto-insert",
+// visible only on the device that came back from background). moveId dedup is
+// seq-independent, so it holds even when the sequence is missing.
+let appliedMoveIds = new Set();
+let moveSerial = 0; // monotonic per-tap counter → unique moveId per move
+const sessionNonce = Date.now().toString(36); // disambiguate moveIds across reloads/rematches
 let lastSnapshotVersion = 0; // Ignore stale realtime board snapshots
 // Highest snapshot version seen *per sender*. Snapshots are stamped with the
 // sender's own Date.now(), which is only monotonic for that one client — never
@@ -464,16 +471,19 @@ function onPlayerLeft(data) {
 // (including our own) flows through: we never place a disc optimistically anymore,
 // so there is no local state to roll back and re-apply (the source of the phantom
 // "auto-inserted" disc + turn break when returning from another app).
-function applyDurableMove(playerId, col, seq) {
+function applyDurableMove(playerId, col, seq, moveId) {
   const mine = playerId === myId;
   if (mine) pendingMove = false;           // our move came back from the server → unlock
   if (!isMultiplayer || gameOver) return;
-  if (seq && seq <= lastAppliedSeq) return; // already in the board → dedup
+  if (moveId && appliedMoveIds.has(moveId)) return; // PRIMARY dedup (seq-independent)
+  if (seq && seq <= lastAppliedSeq) return;          // secondary dedup (when moveId absent)
   if (typeof col !== "number") return;
-  if (board[0][col] !== 0) {                // column full / out of sync — claim the seq, don't drop
+  if (board[0][col] !== 0) {                // column full / out of sync — record id, don't drop
+    if (moveId) appliedMoveIds.add(moveId);
     if (seq) lastAppliedSeq = Math.max(lastAppliedSeq, seq);
     return;
   }
+  if (moveId) appliedMoveIds.add(moveId);
   if (seq) lastAppliedSeq = Math.max(lastAppliedSeq, seq);
   handleMove(col, false);                   // animate, advance turn, detect win/draw
 }
@@ -483,7 +493,8 @@ function onAction(data) {
   if (data.sequence !== undefined) lastSequence = Math.max(lastSequence, data.sequence);
   if (data.action_type !== "move") return;
   const col = data.action_data && data.action_data.col;
-  applyDurableMove(data.player_id, col, Number(data.sequence) || 0);
+  const moveId = data.action_data && data.action_data.moveId;
+  applyDurableMove(data.player_id, col, Number(data.sequence) || 0, moveId);
 }
 
 function discCount(b) {
@@ -555,12 +566,26 @@ function onSync(data) {
   if (!cp && moveActions.length === 0) return; // nothing to rebuild from
 
   // After rebuilding, the board reflects every move in the log, so the highest
-  // move sequence here is the watermark for dedup. A later onAction redelivering
-  // any of these (seq <= watermark) is then skipped — no phantom disc on resume.
+  // move sequence here is the secondary watermark for dedup. The PRIMARY dedup is
+  // `appliedMoveIds`, rebuilt below from exactly the moves we replay — so a later
+  // onAction redelivering any of them (matching moveId) is skipped → no phantom.
   let maxMoveSeq = 0;
   for (const a of moveActions) { const s = Number(a.sequence) || 0; if (s > maxMoveSeq) maxMoveSeq = s; }
   if (!maxMoveSeq && data.sequence !== undefined) maxMoveSeq = Number(data.sequence) || 0;
   lastAppliedSeq = maxMoveSeq;
+  appliedMoveIds = new Set();
+
+  // Replay one move from the log, collapsing a duplicate moveId (a re-sent/double-
+  // stored action). Records the id so the live onAction echo is later deduped.
+  // Returns true when the game just ended (caller stops replaying).
+  function replayLogAction(a) {
+    const mid = a.action_data && a.action_data.moveId;
+    if (mid) {
+      if (appliedMoveIds.has(mid)) return false; // duplicate in the log → collapse
+      appliedMoveIds.add(mid);
+    }
+    return replayMoveSilent(a.action_data.col);
+  }
 
   // The action log is the complete, authoritative move history; the host-written
   // checkpoint can LAG it (a non-host move made while the host was away lives only
@@ -571,7 +596,7 @@ function onSync(data) {
   if (cp && cpDiscs > moveActions.length) {
     applyCheckpoint(cp);                                   // checkpoint = base (the compacted-away prefix)
     for (const a of moveActions) {                          // log = post-checkpoint tail
-      if (replayMoveSilent(a.action_data.col)) break;
+      if (replayLogAction(a)) break;
     }
     finalizeSyncRender();
     return;
@@ -586,7 +611,7 @@ function onSync(data) {
   lastWinnerPlayer = 0;
   lastInsertedPos = null;
   for (const a of moveActions) {
-    if (replayMoveSilent(a.action_data.col)) break;
+    if (replayLogAction(a)) break;
   }
   finalizeSyncRender();
 }
@@ -734,6 +759,7 @@ function init() {
   gameOver = false;
   pendingMove = false;
   lastAppliedSeq = 0;
+  appliedMoveIds = new Set();
   lastWinnerPlayer = 0;
   lastSnapshotVersion = 0;
   lastSnapshotVersionByPlayer = {};
@@ -829,7 +855,10 @@ boardEl.addEventListener("click", (e) => {
     // trade for a turn-based game that must never desync. If the send fails we
     // unlock and resync; if the echo is lost, onSync/onReconnect recovers it.
     pendingMove = true;
-    Usion.game.action("move", { col }).catch((err) => {
+    // Stable per-tap id: survives SDK re-sends (same payload) and round-trips through
+    // the echo + durable log + resync, so the move is applied exactly once everywhere.
+    const moveId = myId + ":" + sessionNonce + ":" + (++moveSerial);
+    Usion.game.action("move", { col, moveId }).catch((err) => {
       pendingMove = false;
       Usion.log("move send failed: " + (err && err.message ? err.message : err));
       Usion.game.requestSync(0);
@@ -945,9 +974,9 @@ function applyBoardSnapshot(snapshot, senderId) {
   if (Array.isArray(snapshot.board)) {
     board = snapshot.board.map((row) => Array.isArray(row) ? row.slice() : Array(COLS).fill(0));
   }
-  // A fresh/empty board means a rematch reset — drop the move-sequence watermark so
-  // the new game's first move (which may restart the server sequence) isn't deduped.
-  if (discCount(board) === 0 && !snapshot.gameOver) lastAppliedSeq = 0;
+  // A fresh/empty board means a rematch reset — drop the dedup watermarks so the new
+  // game's first move (which may restart the server sequence) isn't wrongly skipped.
+  if (discCount(board) === 0 && !snapshot.gameOver) { lastAppliedSeq = 0; appliedMoveIds = new Set(); }
   current = snapshot.current === 2 ? 2 : 1;
   gameOver = !!snapshot.gameOver;
   lastWinnerPlayer = snapshot.lastWinnerPlayer === 2 ? 2 : (snapshot.lastWinnerPlayer === 1 ? 1 : 0);
