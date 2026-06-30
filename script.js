@@ -232,10 +232,18 @@ function maybeNotifyTurn() {
   if (!myTurn) lastTurnNotified = false;
 }
 
-// Host (playerIds[0]) checkpoints authoritative state so reconnecting clients
-// receive it as game_state instead of replaying from zero.
-function hostCheckpoint() {
-  if (!isHostPlayer()) return;
+// Persist authoritative state so a reconnecting/returning client rebuilds from it.
+//
+// ⚠️ Written by WHOEVER JUST ACTED (the mover), NOT only the room host — this is the
+// key lesson from 13. A host-only checkpoint goes STALE the moment the host
+// backgrounds: while the host is away the opponent's move is never snapshotted, so
+// on recovery everyone rebuilds from a checkpoint missing that move. The actor always
+// holds fresh state (it just played), so its checkpoint is current no matter who is
+// backgrounded. The snapshot carries `moveIds` + `seq` (the dedup watermarks it
+// already bakes in) so the INCLUSIVE sync tail — which re-sends the checkpoint's own
+// last move — is recognised as already applied instead of dropping a duplicate disc.
+function writeCheckpoint() {
+  if (!isMultiplayer) return;
   try {
     if (window.Usion && Usion.game && Usion.game.setState) Usion.game.setState(getBoardSnapshot());
   } catch (_) {}
@@ -486,6 +494,9 @@ function applyDurableMove(playerId, col, seq, moveId) {
   if (moveId) appliedMoveIds.add(moveId);
   if (seq) lastAppliedSeq = Math.max(lastAppliedSeq, seq);
   handleMove(col, false);                   // animate, advance turn, detect win/draw
+  // The ACTOR persists the fresh checkpoint (not the host) so a move made while the
+  // host is backgrounded is never lost. Only the mover writes → no write storm.
+  if (mine) writeCheckpoint();
 }
 
 function onAction(data) {
@@ -548,15 +559,23 @@ function finalizeSyncRender() {
   } else {
     updateStatus();
   }
-  if (isMultiplayer) hostCheckpoint();
+  // Do NOT write a checkpoint here: a rebuild from sync must not re-persist state (it
+  // can race a fresher actor checkpoint backwards). Only the actor writes, on its move.
 }
 
 function onSync(data) {
   Usion.log("onSync: actions=" + (data.actions ? data.actions.length : 0) + " seq=" + data.sequence + " checkpoint=" + !!(data.game_state && data.game_state.board));
+  // Nothing newer than we've already applied? No-op. The resume watchdog fires
+  // requestSync several times and stale replies land after we've caught up; each
+  // rebuild would clear pendingMove (letting us double-tap our own turn) and re-render
+  // for nothing. A genuinely newer checkpoint always has seq > lastSequence, so this
+  // never skips real recovery. (Mirrors 13's `syncTop <= lastSeq` guard.)
+  const syncTop = data.sequence !== undefined ? Number(data.sequence) : null;
+  if (syncTop !== null && syncTop <= lastSequence) return;
   pendingMove = false;
-  if (data.sequence !== undefined) {
-    lastSnapshotVersion = Math.max(lastSnapshotVersion, Number(data.sequence) || 0);
-    lastSequence = data.sequence;
+  if (syncTop !== null) {
+    lastSnapshotVersion = Math.max(lastSnapshotVersion, syncTop);
+    lastSequence = syncTop;
   }
 
   const moveActions = (data.actions || []).filter(
@@ -584,6 +603,7 @@ function onSync(data) {
       if (appliedMoveIds.has(mid)) return false; // duplicate in the log → collapse
       appliedMoveIds.add(mid);
     }
+    if (a.sequence) lastAppliedSeq = Math.max(lastAppliedSeq, Number(a.sequence) || 0);
     return replayMoveSilent(a.action_data.col);
   }
 
@@ -884,6 +904,8 @@ function getBoardSnapshot() {
     winnerOverlayVisible: gameOver,
     rematchState,
     order: players.slice(), // authoritative seat order, so a rejoiner restores the same player 1/2 mapping
+    moveIds: Array.from(appliedMoveIds), // dedup watermark: which moves this board already bakes in
+    seq: lastAppliedSeq,                 // secondary watermark (when moveId is absent)
     version: Date.now(),
   };
 }
@@ -950,17 +972,23 @@ function applyRematchState(payload) {
 function applyCheckpoint(state) {
   if (!state || typeof state !== "object" || !Array.isArray(state.board)) return false;
   isMultiplayer = true;
-  applyBoardSnapshot(state, state.order && state.order[0] ? state.order[0] : (players[0] || "host"));
+  // trusted=true: the onSync `game_state` is the SERVER's authoritative latest. Now
+  // that BOTH players write checkpoints (actor-written), attributing every checkpoint
+  // to the host id and applying the per-sender clock guard would let a skewed clock
+  // drop a valid newer checkpoint. The server already resolved last-writer-wins, so
+  // bypass the realtime ordering guard here.
+  applyBoardSnapshot(state, state.order && state.order[0] ? state.order[0] : (players[0] || "host"), true);
   return true;
 }
 
-function applyBoardSnapshot(snapshot, senderId) {
+function applyBoardSnapshot(snapshot, senderId, trusted) {
   const version = Number(snapshot.version || 0);
   // Order snapshots per-sender: each sender's own clock is monotonic, so this
   // drops only genuinely out-of-order packets from THAT player. Comparing across
   // two devices' clocks (skew) used to drop valid moves and deadlock the game.
+  // Skipped for `trusted` (server-authoritative checkpoint) snapshots.
   const prevFromSender = lastSnapshotVersionByPlayer[senderId] || 0;
-  if (version && version < prevFromSender) return;
+  if (!trusted && version && version < prevFromSender) return;
   if (senderId) lastSnapshotVersionByPlayer[senderId] = Math.max(prevFromSender, version);
   lastSnapshotVersion = Math.max(lastSnapshotVersion, version);
   // Adopt the sender's authoritative seat order so player 1/2 — and therefore
@@ -974,9 +1002,18 @@ function applyBoardSnapshot(snapshot, senderId) {
   if (Array.isArray(snapshot.board)) {
     board = snapshot.board.map((row) => Array.isArray(row) ? row.slice() : Array(COLS).fill(0));
   }
-  // A fresh/empty board means a rematch reset — drop the dedup watermarks so the new
-  // game's first move (which may restart the server sequence) isn't wrongly skipped.
-  if (discCount(board) === 0 && !snapshot.gameOver) { lastAppliedSeq = 0; appliedMoveIds = new Set(); }
+  // Adopt the dedup watermarks the snapshot/checkpoint carries. This is THE fix for
+  // the host-resume phantom: the checkpoint bakes its moves into `board`, and the
+  // INCLUSIVE sync tail re-sends the checkpoint's own last move — so unless we know
+  // those moves are "already applied", onSync replays them again and stacks a
+  // duplicate disc (seen only on the device returning from background, since it is
+  // the one that re-syncs). A fresh/empty board (rematch) has no watermarks → reset.
+  if (discCount(board) === 0 && !snapshot.gameOver) {
+    lastAppliedSeq = 0; appliedMoveIds = new Set();
+  } else {
+    appliedMoveIds = new Set(Array.isArray(snapshot.moveIds) ? snapshot.moveIds : []);
+    lastAppliedSeq = Number(snapshot.seq) || lastAppliedSeq;
+  }
   current = snapshot.current === 2 ? 2 : 1;
   gameOver = !!snapshot.gameOver;
   lastWinnerPlayer = snapshot.lastWinnerPlayer === 2 ? 2 : (snapshot.lastWinnerPlayer === 1 ? 1 : 0);
@@ -989,7 +1026,8 @@ function applyBoardSnapshot(snapshot, senderId) {
   }
   hideWinnerBanner();
   renderBoard();
-  if (isMultiplayer) hostCheckpoint();
+  // No checkpoint write here — applying someone else's snapshot must not re-persist
+  // our (possibly older) view over theirs. The actor writes on its own move.
   if (gameOver && lastWinnerPlayer) {
     recordWin(lastWinnerPlayer);
     recordOutcome(lastWinnerPlayer);
@@ -1078,7 +1116,8 @@ function handleMove(col, local = true) {
       gameOver = true;
       recordOutcome(0);
     }
-    if (isMultiplayer) hostCheckpoint();
+    // Checkpoint is written by the ACTOR in applyDurableMove (mine), not here — so an
+    // opponent move we apply locally doesn't overwrite the room state with our view.
 
     animateDrop(col, r, player, () => {
       renderBoard();
