@@ -800,12 +800,22 @@ boardEl.addEventListener("click", (e) => {
       pendingMove = false;
       return;
     }
-    broadcastBoardSnapshot();
-    Usion.game.action("move", { col }).catch((err) => {
-      pendingMove = false;
-      Usion.log("move send failed: " + (err && err.message ? err.message : err));
-      Usion.game.requestSync(0);
-    });
+    // CRITICAL: do NOT leak the move to the opponent until the server has
+    // DURABLY stored it. The realtime board_state snapshot used to fire here
+    // optimistically, before action() resolved — so if we backgrounded the app
+    // right after moving (e.g. switch to Facebook), the opponent advanced on a
+    // move whose durable action never landed in the log. On our return onSync
+    // rebuilds from that log, our move is missing, and the two devices deadlock
+    // on whose turn it is. Broadcasting only AFTER the action resolves enforces
+    // the invariant "the opponent only ever acts on durably-stored moves", so a
+    // lost move is lost on BOTH sides and recovers cleanly via resync.
+    Usion.game.action("move", { col })
+      .then(() => { broadcastBoardSnapshot(); }) // redundant fast path, now post-durable
+      .catch((err) => {
+        pendingMove = false;
+        Usion.log("move send failed: " + (err && err.message ? err.message : err));
+        Usion.game.requestSync(0);
+      });
     return;
   }
 
