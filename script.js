@@ -24,6 +24,11 @@ let lastWinnerPlayer = 0;
 let lastSequence = 0; // Track last processed action sequence
 let connectedCount = 0; // Live socket joins, not just authorized participants
 let pendingMove = false; // Wait for server echo before allowing another multiplayer move
+let lastAppliedSeq = 0; // Highest server move-sequence already reflected in `board`.
+// Every move is applied exactly once, keyed by this monotonic server sequence. This
+// is what kills the "auto-insert on resume" bug: a move buffered/redelivered while we
+// were backgrounded (durable echo, or a redundant snapshot) is recognised as already
+// applied and skipped, instead of dropping a phantom disc into the next free slot.
 let lastSnapshotVersion = 0; // Ignore stale realtime board snapshots
 // Highest snapshot version seen *per sender*. Snapshots are stamped with the
 // sender's own Date.now(), which is only monotonic for that one client — never
@@ -452,22 +457,33 @@ function onPlayerLeft(data) {
   }
 }
 
+// Apply ONE durably-sequenced move (own or opponent) exactly once. The server
+// `seq` is monotonic, so a move we've already reflected — because onSync replayed
+// it, or because it was redelivered after we resumed from background — is skipped
+// here instead of dropping a second disc. This is the single funnel every move
+// (including our own) flows through: we never place a disc optimistically anymore,
+// so there is no local state to roll back and re-apply (the source of the phantom
+// "auto-inserted" disc + turn break when returning from another app).
+function applyDurableMove(playerId, col, seq) {
+  const mine = playerId === myId;
+  if (mine) pendingMove = false;           // our move came back from the server → unlock
+  if (!isMultiplayer || gameOver) return;
+  if (seq && seq <= lastAppliedSeq) return; // already in the board → dedup
+  if (typeof col !== "number") return;
+  if (board[0][col] !== 0) {                // column full / out of sync — claim the seq, don't drop
+    if (seq) lastAppliedSeq = Math.max(lastAppliedSeq, seq);
+    return;
+  }
+  if (seq) lastAppliedSeq = Math.max(lastAppliedSeq, seq);
+  handleMove(col, false);                   // animate, advance turn, detect win/draw
+}
+
 function onAction(data) {
   Usion.log("onAction: type=" + data.action_type + " player=" + data.player_id + " myId=" + myId + " seq=" + data.sequence);
   if (data.sequence !== undefined) lastSequence = Math.max(lastSequence, data.sequence);
   if (data.action_type !== "move") return;
-  if (data.player_id === myId) { pendingMove = false; return; }
-  // Apply the opponent's move from the DURABLE action channel. Previously moves
-  // were only applied via the fire-and-forget realtime "board_state" snapshot, so
-  // a single dropped packet silently desynced the two boards with no recovery
-  // until a reconnect. The realtime snapshot is now just a fast redundant path:
-  // the turn guard below makes applying from either channel idempotent — once a
-  // move advances the turn to me, the duplicate from the other channel is skipped.
-  if (gameOver || !isMultiplayer) return;
   const col = data.action_data && data.action_data.col;
-  if (typeof col !== "number") return;
-  if (current === myPlayer) return;        // already applied (via board_state) → skip
-  handleMove(col, false);                  // animate, advance turn, detect win/draw
+  applyDurableMove(data.player_id, col, Number(data.sequence) || 0);
 }
 
 function discCount(b) {
@@ -537,6 +553,14 @@ function onSync(data) {
   );
   const cp = (data.game_state && Array.isArray(data.game_state.board)) ? data.game_state : null;
   if (!cp && moveActions.length === 0) return; // nothing to rebuild from
+
+  // After rebuilding, the board reflects every move in the log, so the highest
+  // move sequence here is the watermark for dedup. A later onAction redelivering
+  // any of these (seq <= watermark) is then skipped — no phantom disc on resume.
+  let maxMoveSeq = 0;
+  for (const a of moveActions) { const s = Number(a.sequence) || 0; if (s > maxMoveSeq) maxMoveSeq = s; }
+  if (!maxMoveSeq && data.sequence !== undefined) maxMoveSeq = Number(data.sequence) || 0;
+  lastAppliedSeq = maxMoveSeq;
 
   // The action log is the complete, authoritative move history; the host-written
   // checkpoint can LAG it (a non-host move made while the host was away lives only
@@ -709,6 +733,7 @@ function init() {
   current = 1;
   gameOver = false;
   pendingMove = false;
+  lastAppliedSeq = 0;
   lastWinnerPlayer = 0;
   lastSnapshotVersion = 0;
   lastSnapshotVersionByPlayer = {};
@@ -794,28 +819,21 @@ boardEl.addEventListener("click", (e) => {
     if (connectionPaused) return;  // paused while OUR socket is offline; wait for resync
     if (forfeitTimer) return;      // paused while the opponent is gone (grace countdown running)
     if (current !== myPlayer || pendingMove) return;
+    if (board[0][col] !== 0) return;        // column full
+    // No optimistic placement. We lock input (pendingMove) and place our disc only
+    // when the server echoes the move back through the DURABLE, sequenced channel
+    // (applyDurableMove via onAction). Both devices then apply the identical move
+    // from the identical source, keyed by the same sequence — so there is nothing
+    // to roll back if we background mid-move, and no second channel that can drop a
+    // duplicate disc on resume. The ~1 RTT before our disc appears is the correct
+    // trade for a turn-based game that must never desync. If the send fails we
+    // unlock and resync; if the echo is lost, onSync/onReconnect recovers it.
     pendingMove = true;
-    const applied = handleMove(col, true);
-    if (!applied) {
+    Usion.game.action("move", { col }).catch((err) => {
       pendingMove = false;
-      return;
-    }
-    // CRITICAL: do NOT leak the move to the opponent until the server has
-    // DURABLY stored it. The realtime board_state snapshot used to fire here
-    // optimistically, before action() resolved — so if we backgrounded the app
-    // right after moving (e.g. switch to Facebook), the opponent advanced on a
-    // move whose durable action never landed in the log. On our return onSync
-    // rebuilds from that log, our move is missing, and the two devices deadlock
-    // on whose turn it is. Broadcasting only AFTER the action resolves enforces
-    // the invariant "the opponent only ever acts on durably-stored moves", so a
-    // lost move is lost on BOTH sides and recovers cleanly via resync.
-    Usion.game.action("move", { col })
-      .then(() => { broadcastBoardSnapshot(); }) // redundant fast path, now post-durable
-      .catch((err) => {
-        pendingMove = false;
-        Usion.log("move send failed: " + (err && err.message ? err.message : err));
-        Usion.game.requestSync(0);
-      });
+      Usion.log("move send failed: " + (err && err.message ? err.message : err));
+      Usion.game.requestSync(0);
+    });
     return;
   }
 
@@ -927,6 +945,9 @@ function applyBoardSnapshot(snapshot, senderId) {
   if (Array.isArray(snapshot.board)) {
     board = snapshot.board.map((row) => Array.isArray(row) ? row.slice() : Array(COLS).fill(0));
   }
+  // A fresh/empty board means a rematch reset — drop the move-sequence watermark so
+  // the new game's first move (which may restart the server sequence) isn't deduped.
+  if (discCount(board) === 0 && !snapshot.gameOver) lastAppliedSeq = 0;
   current = snapshot.current === 2 ? 2 : 1;
   gameOver = !!snapshot.gameOver;
   lastWinnerPlayer = snapshot.lastWinnerPlayer === 2 ? 2 : (snapshot.lastWinnerPlayer === 1 ? 1 : 0);
