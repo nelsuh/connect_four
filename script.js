@@ -234,16 +234,19 @@ function maybeNotifyTurn() {
 
 // Persist authoritative state so a reconnecting/returning client rebuilds from it.
 //
-// ⚠️ Written by WHOEVER JUST ACTED (the mover), NOT only the room host — this is the
-// key lesson from 13. A host-only checkpoint goes STALE the moment the host
-// backgrounds: while the host is away the opponent's move is never snapshotted, so
-// on recovery everyone rebuilds from a checkpoint missing that move. The actor always
-// holds fresh state (it just played), so its checkpoint is current no matter who is
-// backgrounded. The snapshot carries `moveIds` + `seq` (the dedup watermarks it
-// already bakes in) so the INCLUSIVE sync tail — which re-sends the checkpoint's own
-// last move — is recognised as already applied instead of dropping a duplicate disc.
+// ⚠️ HOST-ONLY. `Usion.game.setState` is accepted by the server ONLY from the host
+// (`playerIds[0]`); a guest's call is a silent no-op. (An earlier version tried to
+// make this "actor-written" — every mover checkpoints — but that was validated by a
+// node-sim that let any client checkpoint; on the real platform the guest writes were
+// dropped, so the checkpoint only ever advanced on host moves anyway.) Because the
+// checkpoint therefore LAGS by the opponent's moves made since the host's last move,
+// `onSync` never trusts it as the whole story: it rebuilds as `checkpoint base + the
+// post-checkpoint tail`, so the lagging moves (which live in the tail) are replayed.
+// The snapshot still carries `moveIds` + `seq` (dedup watermarks) so the INCLUSIVE
+// sync tail — the server re-sends the checkpoint's own last move — is recognised as
+// already applied instead of stacking a duplicate disc.
 function writeCheckpoint() {
-  if (!isMultiplayer) return;
+  if (!isMultiplayer || !isHostPlayer()) return;
   try {
     if (window.Usion && Usion.game && Usion.game.setState) Usion.game.setState(getBoardSnapshot());
   } catch (_) {}
@@ -494,9 +497,12 @@ function applyDurableMove(playerId, col, seq, moveId) {
   if (moveId) appliedMoveIds.add(moveId);
   if (seq) lastAppliedSeq = Math.max(lastAppliedSeq, seq);
   handleMove(col, false);                   // animate, advance turn, detect win/draw
-  // The ACTOR persists the fresh checkpoint (not the host) so a move made while the
-  // host is backgrounded is never lost. Only the mover writes → no write storm.
-  if (mine) writeCheckpoint();
+  // The HOST refreshes the server checkpoint after EVERY move it applies — its own
+  // AND the opponent's (relayed here via onAction). `setState` is host-only, so this
+  // self-gates (writeCheckpoint no-ops for the guest). Checkpointing on every move,
+  // not just the host's own, keeps the checkpoint from lagging by the opponent's
+  // latest move, so the post-checkpoint tail onSync replays stays minimal.
+  writeCheckpoint();
 }
 
 function onAction(data) {
@@ -584,54 +590,66 @@ function onSync(data) {
   const cp = (data.game_state && Array.isArray(data.game_state.board)) ? data.game_state : null;
   if (!cp && moveActions.length === 0) return; // nothing to rebuild from
 
-  // After rebuilding, the board reflects every move in the log, so the highest
-  // move sequence here is the secondary watermark for dedup. The PRIMARY dedup is
-  // `appliedMoveIds`, rebuilt below from exactly the moves we replay — so a later
-  // onAction redelivering any of them (matching moveId) is skipped → no phantom.
-  let maxMoveSeq = 0;
-  for (const a of moveActions) { const s = Number(a.sequence) || 0; if (s > maxMoveSeq) maxMoveSeq = s; }
-  if (!maxMoveSeq && data.sequence !== undefined) maxMoveSeq = Number(data.sequence) || 0;
-  lastAppliedSeq = maxMoveSeq;
-  appliedMoveIds = new Set();
-
-  // Replay one move from the log, collapsing a duplicate moveId (a re-sent/double-
-  // stored action). Records the id so the live onAction echo is later deduped.
-  // Returns true when the game just ended (caller stops replaying).
-  function replayLogAction(a) {
+  // Replay one tail move, deduped, recording its id/seq so a later onAction echo of
+  // it is skipped. Returns true when the game just ended (caller stops replaying).
+  function replayTail(a) {
     const mid = a.action_data && a.action_data.moveId;
     if (mid) {
-      if (appliedMoveIds.has(mid)) return false; // duplicate in the log → collapse
+      if (appliedMoveIds.has(mid)) return false; // already applied → collapse
       appliedMoveIds.add(mid);
     }
     if (a.sequence) lastAppliedSeq = Math.max(lastAppliedSeq, Number(a.sequence) || 0);
     return replayMoveSilent(a.action_data.col);
   }
 
-  // The action log is the complete, authoritative move history; the host-written
-  // checkpoint can LAG it (a non-host move made while the host was away lives only
-  // in the log). So trust the log and only fall back to the checkpoint when the log
-  // was actually compacted — i.e. it carries fewer moves than the checkpoint, in
-  // which case the missing prefix is in the checkpoint and the log is the tail.
-  const cpDiscs = cp ? discCount(cp.board) : -1;
-  if (cp && cpDiscs > moveActions.length) {
-    applyCheckpoint(cp);                                   // checkpoint = base (the compacted-away prefix)
-    for (const a of moveActions) {                          // log = post-checkpoint tail
-      if (replayLogAction(a)) break;
+  if (cp) {
+    // ALWAYS reconstruct as: host checkpoint (the authoritative base) + ONLY the
+    // moves that come AFTER it (the tail). `setState` is HOST-ONLY (playerIds[0]),
+    // so the server checkpoint advances only on the host's moves and `data.actions`
+    // is the POST-CHECKPOINT TAIL the server kept — NOT the full history. The old
+    // code had two wrong paths for this:
+    //   • "full replay from an empty board" dropped every PRE-checkpoint move → the
+    //     board came back SHORT (under-count / desync), and
+    //   • replaying an INCLUSIVE tail (the server re-sends the checkpoint's own last
+    //     move) onto the checkpoint DOUBLED moves → the "too many disks" phantom that
+    //     then got persisted into the next checkpoint and snowballed.
+    // The checkpoint can lag by the opponent's most recent moves (made while the host
+    // was backgrounded); those live in the tail and are applied below.
+    applyCheckpoint(cp);                 // base board + current + dedup watermarks (moveIds/seq)
+    const baseCount = discCount(board);  // moves already baked into the checkpoint
+    // The checkpoint's sequence watermark. `sequence` resets per game (rematch) and
+    // only `move` actions are durable, so it equals the baked-in move count; take the
+    // max so a stored cp.seq can only raise, never undercount, the boundary.
+    const baseSeq = Math.max(Number(cp.seq) || 0, baseCount);
+    for (const a of moveActions) {
+      const s = Number(a.sequence) || 0;
+      const mid = a.action_data && a.action_data.moveId;
+      // Apply a tail move ONLY if we can PROVE it post-dates the checkpoint base:
+      //   • its sequence is beyond the base watermark, OR
+      //   • its moveId hasn't been applied yet (covers the resume path where the SDK
+      //     drops `sequence`; cp.moveIds seeds appliedMoveIds via applyCheckpoint).
+      // If neither is determinable, SKIP — trust the checkpoint. A genuinely-new move
+      // missed here is recovered by the next sync; a duplicated disc would corrupt the
+      // board permanently (it gets persisted into the next checkpoint).
+      const isNew = (s && s > baseSeq) || (mid && !appliedMoveIds.has(mid));
+      if (!isNew) continue;
+      if (replayTail(a)) break;
     }
     finalizeSyncRender();
     return;
   }
 
-  // Authoritative full replay from an empty board. This is what fixes the
-  // stale-checkpoint deadlock: every move (including the opponent's last one) is
-  // in the log, so `current` always reflects whose turn it really is.
+  // No checkpoint yet (early game, host hasn't checkpointed): the log IS the full
+  // history from move 1, so replay it from an empty board.
+  lastAppliedSeq = 0;
+  appliedMoveIds = new Set();
   board = Array.from({ length: ROWS }, () => Array(COLS).fill(0));
   current = 1;
   gameOver = false;
   lastWinnerPlayer = 0;
   lastInsertedPos = null;
   for (const a of moveActions) {
-    if (replayLogAction(a)) break;
+    if (replayTail(a)) break;
   }
   finalizeSyncRender();
 }
