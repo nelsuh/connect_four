@@ -508,6 +508,26 @@ margin: 0 0 20px;
 color: white;
 }
 
+.waiting-invite-btn{
+display: block;
+width: 100%;
+background: linear-gradient(135deg, #00d676, #00a050);
+border: none;
+color: white;
+padding: 11px 22px;
+border-radius: 14px;
+font-size: 14px;
+font-weight: 700;
+cursor: pointer;
+margin: 0 0 10px;
+box-shadow: 0 4px 15px rgba(0,214,118,0.35);
+transition: transform 0.15s;
+}
+
+.waiting-invite-btn:hover{ transform: translateY(-1px); }
+
+.waiting-invite-btn.hidden{ display: none; }
+
 .waiting-bot-btn{
 background: rgba(255,255,255,0.12);
 border: 1.5px solid rgba(255,255,255,0.3);

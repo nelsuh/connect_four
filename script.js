@@ -64,6 +64,7 @@ function hideWinnerBanner() {
 }
 const waitingOverlay   = document.getElementById("waitingOverlay");
 const playBotBtn       = document.getElementById("playBotBtn");
+const inviteBtn        = document.getElementById("inviteBtn");
 const player1Avatar    = document.getElementById("player1Avatar");
 const player2Avatar    = document.getElementById("player2Avatar");
 const player1Name      = document.getElementById("player1Name");
@@ -264,7 +265,19 @@ Usion.init(async function(config) {
   }
   loadStats(); // fire-and-forget; never block init/render
 
-  if (config.roomId) {
+  // Register the solo→host promotion handler UP FRONT, regardless of launch mode
+  // (SDK ≥ 2.20). A game opened solo from Explore can be promoted into a live room
+  // mid-session when the user taps the host's top-bar Share button — never gate the
+  // multiplayer-handler wiring on launch mode.
+  try {
+    if (Usion.game && Usion.game.onRoomAssigned) Usion.game.onRoomAssigned(() => onRoomPromoted());
+  } catch (_) {}
+
+  // Only a real multiplayer launch (a chat game invite) goes online. A solo launch
+  // (Explore / the Game hub) plays the bot even if it was handed a standalone room
+  // for SDK plumbing — trusting roomId alone would strand it in the "waiting for
+  // opponent" overlay forever. Trust the launch MODE.
+  if (!launchedSolo(config) && config.roomId) {
     showWaiting();
     await setupMultiplayer(config.roomId);
   } else {
@@ -275,34 +288,65 @@ Usion.init(async function(config) {
   }
 });
 
+// Did the platform open us solo (Explore / Game hub) rather than a chat game
+// invite? Trust the launch MODE — never infer from roomId alone, since a solo
+// launch may still receive an auto-created standalone_ room for SDK plumbing.
+function launchedSolo(config) {
+  try {
+    let lp = {};
+    if (window.Usion && typeof Usion.getLaunchParams === "function") lp = Usion.getLaunchParams() || {};
+    if (lp.mode === "single") return true;
+    if (lp.mode === "multiplayer") return false;
+    if (window.Usion && Usion.game && typeof Usion.game.isMultiplayer === "function")
+      return !Usion.game.isMultiplayer();
+    const rid = config && config.roomId ? String(config.roomId) : "";
+    return !rid || /^standalone[_-]/i.test(rid);
+  } catch (_) { return false; }
+}
+
 // ── Multiplayer ───────────────────────────────────────────
+
+// All net handlers in one place, registered exactly once. Kept separate from
+// setupMultiplayer so a promoted solo launch (onRoomPromoted) can register them
+// too — per the multiplayer contract, never gate handler registration on mode.
+let netHandlersRegistered = false;
+function registerGameHandlers() {
+  if (netHandlersRegistered) return;
+  netHandlersRegistered = true;
+  Usion.game.onJoined(onJoined);
+  Usion.game.onPlayerJoined(onPlayerJoined);
+  Usion.game.onPlayerLeft(onPlayerLeft);
+  Usion.game.onAction(onAction);
+  Usion.game.onSync(onSync);
+  Usion.game.onRealtime(onRealtime);
+  Usion.game.onRematchRequest(onRematchRequest);
+  Usion.game.onGameRestarted(onGameRestarted);
+  // Surface send failures for observability (SDK ≥ 2.22). Moves ride the durable
+  // action() channel and recover via onSync/onReconnect, so we just log here.
+  try {
+    if (Usion.game.onError) Usion.game.onError((e) => {
+      try { console.warn("game error:", e && e.code, e && e.message); } catch (_) {}
+    });
+  } catch (_) {}
+  Usion.game.onDisconnect(() => {
+    // Real pause: block our own input until we're back online (we can't trust
+    // local state while disconnected — the opponent may have moved).
+    connectionPaused = true;
+    pendingMove = false;
+    if (!gameOver) updateStatus("Connection lost…");
+  });
+  Usion.game.onReconnect(() => {
+    connectionPaused = false;
+    // Re-sync on reconnect to catch missed actions / the host checkpoint.
+    Usion.game.requestSync(0);
+    if (!gameOver) updateStatus();
+  });
+}
 
 async function setupMultiplayer(roomId) {
   try {
     await Usion.game.connect();
-
-    Usion.game.onJoined(onJoined);
-    Usion.game.onPlayerJoined(onPlayerJoined);
-    Usion.game.onPlayerLeft(onPlayerLeft);
-    Usion.game.onAction(onAction);
-    Usion.game.onSync(onSync);
-    Usion.game.onRealtime(onRealtime);
-    Usion.game.onRematchRequest(onRematchRequest);
-    Usion.game.onGameRestarted(onGameRestarted);
-    Usion.game.onDisconnect(() => {
-      // Real pause: block our own input until we're back online (we can't trust
-      // local state while disconnected — the opponent may have moved).
-      connectionPaused = true;
-      pendingMove = false;
-      if (!gameOver) updateStatus("Connection lost…");
-    });
-    Usion.game.onReconnect(() => {
-      connectionPaused = false;
-      // Re-sync on reconnect to catch missed actions / the host checkpoint.
-      Usion.game.requestSync(0);
-      if (!gameOver) updateStatus();
-    });
-
+    registerGameHandlers();
     await Usion.game.join(roomId);
   } catch (err) {
     console.error("Multiplayer setup failed:", err);
@@ -311,6 +355,30 @@ async function setupMultiplayer(roomId) {
     setPlayerDisplayBot();
     init();
   }
+}
+
+// Solo → host promotion (SDK ≥ 2.20): the user tapped the host's top-bar Share
+// button mid-solo and invited someone. The SDK has ALREADY updated
+// getLaunchParams().roomId/.mode and is connect()+join()ing us as playerIds[0] —
+// we do NOT connect/join again (that would race the SDK's own join). We just flip
+// from the local bot game into the online waiting room and register the net
+// handlers; onJoined lands right after and the normal online flow (roster
+// reconcile → startOnlineGame) takes over. requestSync is a harmless idempotent
+// safety net in case the auto-join fired before our handlers were wired.
+function onRoomPromoted() {
+  if (isMultiplayer) return;   // already online — nothing to flip
+  // Re-seed the canonical roster from the freshly-assigned platform roster so the
+  // seat order (player 1/2) is identical on every device.
+  try {
+    const ids = (Usion.config && Usion.config.playerIds) || [];
+    if (ids && ids.length) { canonicalRoster = ids.slice(); players = canonicalRoster.slice(); }
+  } catch (_) {}
+  waitingForOpponent = true;
+  pendingMove = false;
+  init();                 // reset to a clean board for the online match
+  showWaiting();
+  registerGameHandlers();
+  try { if (Usion.game && Usion.game.requestSync) Usion.game.requestSync(0); } catch (_) {}
 }
 
 // ── Foreground catch-up ───────────────────────────────────
@@ -735,10 +803,26 @@ function setPlayerDisplayBot() {
 function showWaiting() {
   waitingForOpponent = true;
   waitingOverlay.classList.add("show");
+  // The invite button opens the platform's friend/group picker (Usion.game.invite)
+  // — never a custom UI. The host's top-bar Share button does the same; both are
+  // the platform's. Show it only when the SDK actually supports invite().
+  if (inviteBtn) {
+    const canInvite = typeof Usion !== "undefined" && Usion.game && typeof Usion.game.invite === "function";
+    inviteBtn.classList.toggle("hidden", !canInvite);
+  }
 }
 
 function hideWaiting() {
   waitingOverlay.classList.remove("show");
+}
+
+if (inviteBtn) {
+  inviteBtn.addEventListener("click", () => {
+    try {
+      inviteBtn.disabled = true;
+      Promise.resolve(Usion.game.invite()).catch(() => {}).finally(() => { inviteBtn.disabled = false; });
+    } catch (_) { inviteBtn.disabled = false; }
+  });
 }
 
 playBotBtn.addEventListener("click", () => {
