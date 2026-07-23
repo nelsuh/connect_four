@@ -220,7 +220,37 @@ function recordOutcome(winnerPlayer) {
   }
   persistStats();
   submitLeaderboard();
+  reportMatchToDM(winnerPlayer); // Game Center drops a result card into both players' DM
   try { if (window.Usion && Usion.cloud && Usion.cloud.shared) Usion.cloud.shared.incr("games_total", 1); } catch (_) {}
+}
+
+// Report the final 1-on-1 result so the platform drops a result card into both
+// players' direct chat ("You beat Bob" / "Bob beat you"), each written from
+// their own perspective, with a tap-to-play button. Host-authoritative: only
+// players[0] reports, exactly once per match; the backend re-validates the
+// roster and dedupes. Skipped vs the local AI (no real opponent) and on
+// non-1v1 rooms. Mirrors table_soccer's reportMatchToGameCenter.
+let matchSeq = 0;              // per-match counter → unique matchId
+let resultReportedThisGame = false;
+function reportMatchToDM(winnerPlayer) {
+  if (resultReportedThisGame) return;
+  if (!isMultiplayer || players.length !== 2 || myId !== players[0]) return;
+  if (!window.Usion || !Usion.game || typeof Usion.game.reportResult !== "function") return; // older injected SDK
+  resultReportedThisGame = true;
+  matchSeq++;
+  var scores = {};
+  scores[players[0]] = 0;
+  scores[players[1]] = 0;
+  try {
+    var payload = { scores: scores, metric: "connect4", matchId: "c4-" + matchSeq };
+    if (!winnerPlayer) {
+      payload.draw = true;
+    } else {
+      payload.winnerId = players[winnerPlayer - 1];
+      payload.displayScore = winnerPlayer === 1 ? "🔴 win" : "🟡 win";
+    }
+    Usion.game.reportResult(payload).catch(function () {}); // fire-and-forget — never block the win screen
+  } catch (e) { /* ignore */ }
 }
 
 function maybeNotifyTurn() {
@@ -889,6 +919,7 @@ function init() {
   lastInsertedPos = null;
   winRecordedThisGame = false;
   statsRecordedThisGame = false;
+  resultReportedThisGame = false;
   lastTurnNotified = false;
   clearForfeitGrace();
   hideWinnerBanner();
