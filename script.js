@@ -238,16 +238,14 @@ function reportMatchToDM(winnerPlayer) {
   if (!window.Usion || !Usion.game || typeof Usion.game.reportResult !== "function") return; // older injected SDK
   resultReportedThisGame = true;
   matchSeq++;
-  var scores = {};
-  scores[players[0]] = 0;
-  scores[players[1]] = 0;
   try {
-    var payload = { scores: scores, metric: "connect4", matchId: "c4-" + matchSeq };
+    // No numeric score in Connect Four — omit scores/displayScore so the card
+    // shows just "You beat X" / "X beat you" with no "0 : 0" line.
+    var payload = { matchId: "c4-" + matchSeq };
     if (!winnerPlayer) {
       payload.draw = true;
     } else {
       payload.winnerId = players[winnerPlayer - 1];
-      payload.displayScore = winnerPlayer === 1 ? "🔴 win" : "🟡 win";
     }
     Usion.game.reportResult(payload).catch(function () {}); // fire-and-forget — never block the win screen
   } catch (e) { /* ignore */ }
