@@ -194,7 +194,7 @@ function submitLeaderboard() {
   try {
     if (window.Usion && Usion.leaderboard) {
       // Score = total wins; ranked highest-first. (Needs leaderboard.enabled on the service.)
-      Usion.leaderboard.submit(myStats.wins, { games: myStats.games, draws: myStats.draws });
+      Usion.leaderboard.submit(myStats.wins);
     }
   } catch (_) {}
 }
