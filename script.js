@@ -154,13 +154,12 @@ function recordWin(playerSlot) {
   persistCurrentWins();
 }
 
-// ── Usion capabilities: cloud stats · leaderboard · notify · checkpoint ──
+// ── Usion capabilities: cloud stats · leaderboard · checkpoint ──
 // All wrappers are defensive: missing modules / standalone preview must never
 // throw (a thrown error in init blanks the game). They no-op gracefully.
 
 let myStats = { wins: 0, losses: 0, draws: 0, games: 0 };
 let statsRecordedThisGame = false;
-let lastTurnNotified = false;
 const STATS_KEY = "c4:stats";
 
 function isHostPlayer() {
@@ -199,11 +198,6 @@ function submitLeaderboard() {
   } catch (_) {}
 }
 
-function notifySelf(title, body) {
-  // Notifications disabled — no push/banner is sent.
-  // try { if (window.Usion && Usion.notify && document.hidden) Usion.notify.send({ title, body }); } catch (_) {}
-}
-
 // Record MY outcome exactly once per multiplayer game (idempotent across replay).
 function recordOutcome(winnerPlayer) {
   if (statsRecordedThisGame || !isMultiplayer) return;
@@ -213,10 +207,8 @@ function recordOutcome(winnerPlayer) {
     myStats.draws += 1;
   } else if (winnerPlayer === myPlayer) {
     myStats.wins += 1;
-    notifySelf("You won! 🎉", "You won your Connect Four match");
   } else {
     myStats.losses += 1;
-    notifySelf("Match over", "Your Connect Four match ended");
   }
   persistStats();
   submitLeaderboard();
@@ -249,16 +241,6 @@ function reportMatchToDM(winnerPlayer) {
     }
     Usion.game.reportResult(payload).catch(function () {}); // fire-and-forget — never block the win screen
   } catch (e) { /* ignore */ }
-}
-
-function maybeNotifyTurn() {
-  if (!isMultiplayer || gameOver) { lastTurnNotified = false; return; }
-  const myTurn = current === myPlayer;
-  if (myTurn && document.hidden && !lastTurnNotified) {
-    lastTurnNotified = true;
-    notifySelf("Your turn", "It's your move in Connect Four");
-  }
-  if (!myTurn) lastTurnNotified = false;
 }
 
 // Persist authoritative state so a reconnecting/returning client rebuilds from it.
@@ -561,7 +543,6 @@ function forfeitToMe() {
 function onPlayerLeft(data) {
   connectedCount = Math.max(0, connectedCount - 1);
   if (gameOver) return;
-  notifySelf("Opponent left", "Your opponent left the Connect Four match");
   if (isMultiplayer && myPlayer && connectedCount <= 1) {
     // Decisive: only we remain. Hold a grace window before declaring forfeit so
     // a quick rejoin resumes the game exactly where it was.
@@ -918,7 +899,6 @@ function init() {
   winRecordedThisGame = false;
   statsRecordedThisGame = false;
   resultReportedThisGame = false;
-  lastTurnNotified = false;
   clearForfeitGrace();
   hideWinnerBanner();
   renderBoard();
@@ -954,7 +934,6 @@ function playerLabelForStatus(playerId, fallback) {
 }
 
 function updateStatus(text) {
-  maybeNotifyTurn();
   if (text) { statusEl.textContent = text; return; }
   // While the opponent is gone, the grace countdown owns the status line — don't
   // let a stray resync overwrite the "paused / waiting to rejoin" message.
