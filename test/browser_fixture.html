@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Connect 4 browser fixture</title>
+  <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+  <div class="phone">
+    <div class="topbar">
+      <div class="player left" id="player1Panel">
+        <img id="player1Avatar" alt="">
+        <div class="name" id="player1Name">Red</div>
+        <div class="wins" id="player1Wins">Wins: <span>0</span></div>
+      </div>
+      <div class="vs">VS</div>
+      <div class="player right" id="player2Panel">
+        <img id="player2Avatar" alt="">
+        <div class="name" id="player2Name">Yellow</div>
+        <div class="wins" id="player2Wins">Wins: <span>0</span></div>
+      </div>
+    </div>
+    <div class="turnIndicator" id="status">Your Turn</div>
+    <div id="board"></div>
+    <div id="winnerBanner" class="winner-banner" hidden>
+      <span class="winner-banner-emoji" id="winnerEmoji">🏆</span>
+      <span class="winner-banner-text"><strong id="winnerNameDisplay">Red</strong> wins!</span>
+      <div class="winner-banner-actions">
+        <button class="winner-btn" id="winnerPlayAgain">Rematch</button>
+      </div>
+    </div>
+    <div class="controls">
+      <select id="difficulty">
+        <option value="1">Easy</option>
+        <option value="3">Medium</option>
+        <option value="5">Hard</option>
+      </select>
+    </div>
+  </div>
+  <div id="waitingOverlay" class="waiting-overlay">
+    <div class="waiting-card">
+      <div class="waiting-spinner"></div>
+      <p class="waiting-text">Waiting for opponent…</p>
+      <button class="waiting-invite-btn hidden" id="inviteBtn">Invite a friend</button>
+      <button class="waiting-bot-btn" id="playBotBtn">Play vs Bot instead</button>
+    </div>
+  </div>
+  <script>
+    window.Usion = {
+      init: function (cb) {
+        setTimeout(function () {
+          cb({ userId: "browser-player", userName: "You", playerIds: [] });
+        }, 0);
+      },
+      getLaunchParams: function () { return { mode: "single" }; },
+      log: function () {},
+      cloud: {
+        get: function () { return Promise.resolve(null); },
+        set: function () { return Promise.resolve({ success: true }); },
+        shared: { incr: function () { return Promise.resolve({ success: true }); } }
+      },
+      leaderboard: { submit: function () { return Promise.resolve({ success: true }); } },
+      game: {
+        isMultiplayer: function () { return false; },
+        onRoomAssigned: function () {}
+      }
+    };
+  </script>
+  <script src="../script.js"></script>
+</body>
+</html>

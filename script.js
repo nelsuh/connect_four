@@ -24,7 +24,8 @@ let lastWinnerPlayer = 0;
 let lastSequence = 0; // Track last processed action sequence
 let connectedCount = 0; // Live socket joins, not just authorized participants
 let pendingMove = false; // Wait for server echo before allowing another multiplayer move
-let lastAppliedSeq = 0; // Highest server move-sequence already reflected in `board` (secondary dedup).
+let pendingMoveId = null;
+let lastAppliedSeq = 0; // Highest durable action sequence already reflected in `board`.
 // PRIMARY dedup: the set of moveIds already reflected in `board`. Each move carries a
 // client-generated `moveId` in its action_data; the SDK preserves it verbatim through
 // the echo, the durable log, and resync — UNLIKE the server `sequence`, which we found
@@ -42,9 +43,13 @@ let lastSnapshotVersion = 0; // Ignore stale realtime board snapshots
 // compare versions across two devices' clocks (skew silently drops valid moves).
 let lastSnapshotVersionByPlayer = {};
 let rematchState = "idle"; // idle | requested
+let restartPending = false;
+let rematchSerial = 0;
 let connectionPaused = false; // true while our socket is disconnected (block input)
 let forfeitTimer = null;      // 20s grace countdown when the opponent leaves mid-game
 const FORFEIT_GRACE_MS = 20000;
+const STALE_SYNC_MS = 4000;
+let lastNetworkProgressAt = Date.now();
 
 // ── DOM refs ──────────────────────────────────────────────
 const boardEl          = document.getElementById("board");
@@ -244,22 +249,17 @@ function reportMatchToDM(winnerPlayer) {
 }
 
 // Persist authoritative state so a reconnecting/returning client rebuilds from it.
-//
-// ⚠️ HOST-ONLY. `Usion.game.setState` is accepted by the server ONLY from the host
-// (`playerIds[0]`); a guest's call is a silent no-op. (An earlier version tried to
-// make this "actor-written" — every mover checkpoints — but that was validated by a
-// node-sim that let any client checkpoint; on the real platform the guest writes were
-// dropped, so the checkpoint only ever advanced on host moves anyway.) Because the
-// checkpoint therefore LAGS by the opponent's moves made since the host's last move,
-// `onSync` never trusts it as the whole story: it rebuilds as `checkpoint base + the
-// post-checkpoint tail`, so the lagging moves (which live in the tail) are replayed.
-// The snapshot still carries `moveIds` + `seq` (dedup watermarks) so the INCLUSIVE
-// sync tail — the server re-sends the checkpoint's own last move — is recognised as
-// already applied instead of stacking a duplicate disc.
+// setState is actor-writable and CAS-versioned by the SDK: both clients deterministically
+// apply the same sequenced action, so either may keep the checkpoint fresh. If an older
+// write loses the CAS race, pull the winner instead of retrying stale state.
 function writeCheckpoint() {
-  if (!isMultiplayer || !isHostPlayer()) return;
+  if (!isMultiplayer) return;
   try {
-    if (window.Usion && Usion.game && Usion.game.setState) Usion.game.setState(getBoardSnapshot());
+    if (window.Usion && Usion.game && Usion.game.setState) {
+      Promise.resolve(Usion.game.setState(getBoardSnapshot())).then((result) => {
+        if (result && result.code === "STALE_STATE") requestAuthoritativeSync();
+      }).catch(() => {});
+    }
   } catch (_) {}
 }
 
@@ -320,6 +320,13 @@ function launchedSolo(config) {
 // setupMultiplayer so a promoted solo launch (onRoomPromoted) can register them
 // too — per the multiplayer contract, never gate handler registration on mode.
 let netHandlersRegistered = false;
+function requestAuthoritativeSync() {
+  if (!isMultiplayer || !window.Usion || !Usion.game || !Usion.game.requestSync) return;
+  try {
+    Promise.resolve(Usion.game.requestSync(0)).catch(() => {});
+  } catch (_) {}
+}
+
 function registerGameHandlers() {
   if (netHandlersRegistered) return;
   netHandlersRegistered = true;
@@ -342,13 +349,12 @@ function registerGameHandlers() {
     // Real pause: block our own input until we're back online (we can't trust
     // local state while disconnected — the opponent may have moved).
     connectionPaused = true;
-    pendingMove = false;
     if (!gameOver) updateStatus("Connection lost…");
   });
   Usion.game.onReconnect(() => {
     connectionPaused = false;
     // Re-sync on reconnect to catch missed actions / the host checkpoint.
-    Usion.game.requestSync(0);
+    requestAuthoritativeSync();
     if (!gameOver) updateStatus();
   });
 }
@@ -385,10 +391,11 @@ function onRoomPromoted() {
   } catch (_) {}
   waitingForOpponent = true;
   pendingMove = false;
+  pendingMoveId = null;
   init();                 // reset to a clean board for the online match
   showWaiting();
   registerGameHandlers();
-  try { if (Usion.game && Usion.game.requestSync) Usion.game.requestSync(0); } catch (_) {}
+  requestAuthoritativeSync();
 }
 
 // ── Foreground catch-up ───────────────────────────────────
@@ -402,7 +409,7 @@ function onRoomPromoted() {
 function foregroundResync() {
   if (!isMultiplayer || gameOver) return;
   connectionPaused = false;
-  try { if (window.Usion && Usion.game && Usion.game.requestSync) Usion.game.requestSync(0); } catch (_) {}
+  requestAuthoritativeSync();
   if (!gameOver) updateStatus();
 }
 // Web fires visibilitychange on tab refocus — use it there.
@@ -428,6 +435,18 @@ if (typeof document !== "undefined" && document.addEventListener) {
   }, 1000);
 })();
 
+// A durable action should normally arrive exactly once, but a suspended WebView or
+// a simulated-loss test can miss the push without producing a socket disconnect.
+// While a match is idle, periodically ask for the sequenced log/checkpoint. This
+// turns a lost opponent move (or a lost echo of our own move) into a short pause
+// instead of a permanent "both players are waiting" dead end.
+setInterval(function staleTurnWatchdog() {
+  if (!isMultiplayer || gameOver || connectionPaused || forfeitTimer) return;
+  if (Date.now() - lastNetworkProgressAt < STALE_SYNC_MS) return;
+  lastNetworkProgressAt = Date.now();
+  requestAuthoritativeSync();
+}, 1000);
+
 // Reconcile the server's id list into `players` WITHOUT disturbing the canonical
 // seat order. When we have a canonical roster (config / checkpoint), we keep that
 // order and only append ids we hadn't seen; otherwise we adopt the server order
@@ -452,7 +471,8 @@ function onJoined(data) {
   }));
   reconcilePlayers(data.player_ids);
   connectedCount = Number(data.connected_count || 0);
-  if (data.sequence !== undefined) lastSequence = data.sequence;
+  if (data.sequence !== undefined) lastSequence = Number(data.sequence) || 0;
+  lastNetworkProgressAt = Date.now();
 
   // Announce our identity to the room
   Usion.game.realtime("player_info", {
@@ -461,12 +481,12 @@ function onJoined(data) {
   });
 
   if (connectedCount >= 2 && waitingForOpponent) {
-    startOnlineGame();
+    startOnlineGame(data.game_state);
   } else if (waitingForOpponent && data.game_state && Array.isArray(data.game_state.board)) {
     // A host checkpoint in the join ack means a match is already underway — rejoin
     // it even if the live connected_count momentarily reads 1 (opponent not yet
     // counted). startOnlineGame → requestSync(0) → onSync rebuilds from it.
-    startOnlineGame();
+    startOnlineGame(data.game_state);
   }
 }
 
@@ -487,6 +507,7 @@ function onPlayerJoined(data) {
   if (typeof data.connected_count === "number") connectedCount = Math.max(connectedCount, data.connected_count);
   if (Array.isArray(data.player_ids) && data.player_ids.length >= 2) connectedCount = Math.max(connectedCount, 2);
   if (data.player && data.player.is_connected) connectedCount = Math.max(connectedCount, 2);
+  lastNetworkProgressAt = Date.now();
   // Re-broadcast our identity to the new joiner
   Usion.game.realtime("player_info", {
     name: playerNames[myId],
@@ -495,7 +516,7 @@ function onPlayerJoined(data) {
   // Opponent came back during the forfeit grace window → cancel and resync.
   if (connectedCount >= 2 && forfeitTimer) {
     clearForfeitGrace();
-    if (!gameOver) { updateStatus(); Usion.game.requestSync(0); }
+    if (!gameOver) { updateStatus(); requestAuthoritativeSync(); }
   }
   if (connectedCount >= 2 && waitingForOpponent) {
     startOnlineGame();
@@ -561,34 +582,94 @@ function onPlayerLeft(data) {
 // "auto-inserted" disc + turn break when returning from another app).
 function applyDurableMove(playerId, col, seq, moveId) {
   const mine = playerId === myId;
-  if (mine) pendingMove = false;           // our move came back from the server → unlock
-  if (!isMultiplayer || gameOver) return;
-  if (moveId && appliedMoveIds.has(moveId)) return; // PRIMARY dedup (seq-independent)
-  if (seq && seq <= lastAppliedSeq) return;          // secondary dedup (when moveId absent)
-  if (typeof col !== "number") return;
-  if (board[0][col] !== 0) {                // column full / out of sync — record id, don't drop
+  if (!isMultiplayer) return;
+  if (moveId && appliedMoveIds.has(moveId)) {
+    if (seq) lastAppliedSeq = Math.max(lastAppliedSeq, seq);
+    if (mine && (!pendingMoveId || pendingMoveId === moveId)) {
+      pendingMove = false;
+      pendingMoveId = null;
+    }
+    return;
+  }
+  if (seq && seq <= lastAppliedSeq) {
+    if (mine && (!pendingMoveId || pendingMoveId === moveId)) {
+      pendingMove = false;
+      pendingMoveId = null;
+    }
+    return;
+  }
+  if (seq && seq > lastAppliedSeq + 1) {
+    // We missed at least one durable action. Applying this one against the wrong
+    // turn would manufacture a disk, so hydrate the gap first.
+    requestAuthoritativeSync();
+    return;
+  }
+
+  const expectedPlayerId = players[current - 1];
+  const validTurn = !gameOver && expectedPlayerId && playerId === expectedPlayerId;
+  const validColumn = Number.isInteger(col) && col >= 0 && col < COLS && board[0][col] === 0;
+  if (!validTurn || !validColumn) {
+    // Invalid/out-of-turn actions are still consumed in the durable sequence so
+    // they cannot permanently wedge the next legitimate move behind a gap.
     if (moveId) appliedMoveIds.add(moveId);
     if (seq) lastAppliedSeq = Math.max(lastAppliedSeq, seq);
+    if (mine && (!pendingMoveId || pendingMoveId === moveId)) {
+      pendingMove = false;
+      pendingMoveId = null;
+    }
     return;
   }
   if (moveId) appliedMoveIds.add(moveId);
   if (seq) lastAppliedSeq = Math.max(lastAppliedSeq, seq);
   handleMove(col, false);                   // animate, advance turn, detect win/draw
-  // The HOST refreshes the server checkpoint after EVERY move it applies — its own
-  // AND the opponent's (relayed here via onAction). `setState` is host-only, so this
-  // self-gates (writeCheckpoint no-ops for the guest). Checkpointing on every move,
-  // not just the host's own, keeps the checkpoint from lagging by the opponent's
-  // latest move, so the post-checkpoint tail onSync replays stays minimal.
+  if (mine && (!pendingMoveId || pendingMoveId === moveId)) {
+    pendingMove = false;
+    pendingMoveId = null;
+  }
+  // Every client deterministically reaches this state, so either actor can refresh
+  // the CAS-versioned checkpoint and keep the recovery tail minimal.
+  writeCheckpoint();
+}
+
+function applyDurableRematchOffer(playerId, seq, offerId) {
+  if (!isMultiplayer) return;
+  if (offerId && appliedMoveIds.has(offerId)) return;
+  if (seq && seq <= lastAppliedSeq) return;
+  if (seq && seq > lastAppliedSeq + 1) { requestAuthoritativeSync(); return; }
+  if (offerId) appliedMoveIds.add(offerId);
+  if (seq) lastAppliedSeq = Math.max(lastAppliedSeq, seq);
+  if (!gameOver) return;
+
+  const bothRequested = rematchRequested && playerId !== myId;
+  rematchRequested = playerId === myId || rematchRequested;
+  rematchState = "requested";
+  syncRematchUi();
+  writeCheckpoint();
+  if (bothRequested && isHostPlayer()) commitRematchRestart();
+}
+
+function applyDurableRestart(seq, restartId) {
+  if (!isMultiplayer) return;
+  if (restartId && appliedMoveIds.has(restartId)) return;
+  if (seq && seq <= lastAppliedSeq) return;
+  if (seq && seq > lastAppliedSeq + 1) { requestAuthoritativeSync(); return; }
+  resetForRematch(seq, restartId);
   writeCheckpoint();
 }
 
 function onAction(data) {
   Usion.log("onAction: type=" + data.action_type + " player=" + data.player_id + " myId=" + myId + " seq=" + data.sequence);
-  if (data.sequence !== undefined) lastSequence = Math.max(lastSequence, data.sequence);
-  if (data.action_type !== "move") return;
-  const col = data.action_data && data.action_data.col;
-  const moveId = data.action_data && data.action_data.moveId;
-  applyDurableMove(data.player_id, col, Number(data.sequence) || 0, moveId);
+  lastNetworkProgressAt = Date.now();
+  if (data.sequence !== undefined) lastSequence = Math.max(lastSequence, Number(data.sequence) || 0);
+  const payload = data.action_data || {};
+  const seq = Number(data.sequence) || 0;
+  if (data.action_type === "move") {
+    applyDurableMove(data.player_id, payload.col, seq, payload.moveId);
+  } else if (data.action_type === "rematch_offer") {
+    applyDurableRematchOffer(data.player_id, seq, payload.offerId);
+  } else if (data.action_type === "restart") {
+    applyDurableRestart(seq, payload.restartId);
+  }
 }
 
 function discCount(b) {
@@ -597,10 +678,42 @@ function discCount(b) {
   return n;
 }
 
-// Drop the current player's disc into `col` on the GLOBAL board, advancing the
+function isValidBoardState(candidate) {
+  return Array.isArray(candidate) &&
+    candidate.length === ROWS &&
+    candidate.every((row) =>
+      Array.isArray(row) &&
+      row.length === COLS &&
+      row.every((cell) => cell === 0 || cell === 1 || cell === 2)
+    );
+}
+
+function resetBoardForReplay(baseSeq, actionId, beginNewMatch) {
+  board = Array.from({ length: ROWS }, () => Array(COLS).fill(0));
+  current = 1;
+  gameOver = false;
+  lastWinnerPlayer = 0;
+  lastInsertedPos = null;
+  rematchState = "idle";
+  rematchRequested = false;
+  restartPending = false;
+  if (beginNewMatch) {
+    winRecordedThisGame = false;
+    statsRecordedThisGame = false;
+    resultReportedThisGame = false;
+  }
+  appliedMoveIds = new Set();
+  if (actionId) appliedMoveIds.add(actionId);
+  lastAppliedSeq = Number(baseSeq) || 0;
+  hideWinnerBanner();
+}
+
+// Drop a validated player's disc into `col` on the GLOBAL board, advancing the
 // turn and detecting win/draw exactly like a live move but without animation.
-// Returns true if the game just ended (caller should stop replaying).
-function replayMoveSilent(col) {
+function replayMoveSilent(playerId, col) {
+  if (gameOver) return false;
+  if (players[current - 1] !== playerId) return false;
+  if (!Number.isInteger(col) || col < 0 || col >= COLS) return false;
   for (let r = ROWS - 1; r >= 0; r--) {
     if (board[r][col] !== 0) continue;
     board[r][col] = current;
@@ -621,6 +734,53 @@ function replayMoveSilent(col) {
     return false;
   }
   return false; // column full / invalid — skip
+}
+
+function storedActionId(action) {
+  const payload = action.action_data || {};
+  return payload.moveId || payload.offerId || payload.restartId || null;
+}
+
+function reconcilePendingMove() {
+  if (!pendingMoveId) {
+    pendingMove = false;
+    return;
+  }
+  if (appliedMoveIds.has(pendingMoveId)) {
+    pendingMove = false;
+    pendingMoveId = null;
+  }
+}
+
+// Deterministically fold one stored action into the board. Invalid actions still
+// advance the sequence watermark but never alter a token or the turn.
+function replayStoredAction(action) {
+  const seq = Number(action.sequence) || 0;
+  const actionId = storedActionId(action);
+  if (actionId && appliedMoveIds.has(actionId)) {
+    if (seq) lastAppliedSeq = Math.max(lastAppliedSeq, seq);
+    return;
+  }
+  if (seq && seq <= lastAppliedSeq) return;
+
+  if (action.action_type === "restart") {
+    resetBoardForReplay(seq, actionId, true);
+    return;
+  }
+
+  if (actionId) appliedMoveIds.add(actionId);
+  if (seq) lastAppliedSeq = Math.max(lastAppliedSeq, seq);
+  const payload = action.action_data || {};
+
+  if (action.action_type === "rematch_offer") {
+    if (gameOver) {
+      rematchState = "requested";
+      rematchRequested = rematchRequested || action.player_id === myId;
+    }
+    return;
+  }
+
+  if (action.action_type === "move") replayMoveSilent(action.player_id, payload.col);
 }
 
 function finalizeSyncRender() {
@@ -648,90 +808,62 @@ function finalizeSyncRender() {
 
 function onSync(data) {
   Usion.log("onSync: actions=" + (data.actions ? data.actions.length : 0) + " seq=" + data.sequence + " checkpoint=" + !!(data.game_state && data.game_state.board));
-  // Nothing newer than we've already applied? No-op. The resume watchdog fires
-  // requestSync several times and stale replies land after we've caught up; each
-  // rebuild would clear pendingMove (letting us double-tap our own turn) and re-render
-  // for nothing. A genuinely newer checkpoint always has seq > lastSequence, so this
-  // never skips real recovery. (Mirrors 13's `syncTop <= lastSeq` guard.)
+  lastNetworkProgressAt = Date.now();
+  // Compare with the sequence actually reflected in the BOARD, not lastSequence:
+  // onJoined reports the room's top sequence before this client has hydrated it.
+  // The old `syncTop <= lastSequence` guard therefore discarded the very first
+  // sync of a late/rejoining player, leaving opponent disks invisible forever.
   const syncTop = data.sequence !== undefined ? Number(data.sequence) : null;
-  if (syncTop !== null && syncTop <= lastSequence) return;
-  pendingMove = false;
+  if (syncTop !== null && syncTop < lastAppliedSeq) return;
   if (syncTop !== null) {
     lastSnapshotVersion = Math.max(lastSnapshotVersion, syncTop);
-    lastSequence = syncTop;
+    lastSequence = Math.max(lastSequence, syncTop);
   }
 
-  const moveActions = (data.actions || []).filter(
-    (a) => a.action_type === "move" && a.action_data && a.action_data.col !== undefined
+  const storedActions = (data.actions || []).filter(
+    (a) => a && ["move", "rematch_offer", "restart"].includes(a.action_type)
   );
-  const cp = (data.game_state && Array.isArray(data.game_state.board)) ? data.game_state : null;
-  if (!cp && moveActions.length === 0) return; // nothing to rebuild from
-
-  // Replay one tail move, deduped, recording its id/seq so a later onAction echo of
-  // it is skipped. Returns true when the game just ended (caller stops replaying).
-  function replayTail(a) {
-    const mid = a.action_data && a.action_data.moveId;
-    if (mid) {
-      if (appliedMoveIds.has(mid)) return false; // already applied → collapse
-      appliedMoveIds.add(mid);
-    }
-    if (a.sequence) lastAppliedSeq = Math.max(lastAppliedSeq, Number(a.sequence) || 0);
-    return replayMoveSilent(a.action_data.col);
+  const cp = (data.game_state && isValidBoardState(data.game_state.board)) ? data.game_state : null;
+  if (!cp && storedActions.length === 0) {
+    reconcilePendingMove();
+    return;
   }
 
   if (cp) {
-    // ALWAYS reconstruct as: host checkpoint (the authoritative base) + ONLY the
-    // moves that come AFTER it (the tail). `setState` is HOST-ONLY (playerIds[0]),
-    // so the server checkpoint advances only on the host's moves and `data.actions`
-    // is the POST-CHECKPOINT TAIL the server kept — NOT the full history. The old
-    // code had two wrong paths for this:
+    // ALWAYS reconstruct as: latest CAS checkpoint (the authoritative base) +
+    // only stored actions after it. The old code had two wrong paths for this:
     //   • "full replay from an empty board" dropped every PRE-checkpoint move → the
     //     board came back SHORT (under-count / desync), and
     //   • replaying an INCLUSIVE tail (the server re-sends the checkpoint's own last
     //     move) onto the checkpoint DOUBLED moves → the "too many disks" phantom that
     //     then got persisted into the next checkpoint and snowballed.
-    // The checkpoint can lag by the opponent's most recent moves (made while the host
-    // was backgrounded); those live in the tail and are applied below.
-    applyCheckpoint(cp);                 // base board + current + dedup watermarks (moveIds/seq)
-    const baseCount = discCount(board);  // moves already baked into the checkpoint
-    // The checkpoint's sequence watermark. `sequence` resets per game (rematch) and
-    // only `move` actions are durable, so it equals the baked-in move count; take the
-    // max so a stored cp.seq can only raise, never undercount, the boundary.
-    const baseSeq = Math.max(Number(cp.seq) || 0, baseCount);
-    for (const a of moveActions) {
-      const s = Number(a.sequence) || 0;
-      const mid = a.action_data && a.action_data.moveId;
-      // Apply a tail move ONLY if we can PROVE it post-dates the checkpoint base:
-      //   • its sequence is beyond the base watermark, OR
-      //   • its moveId hasn't been applied yet (covers the resume path where the SDK
-      //     drops `sequence`; cp.moveIds seeds appliedMoveIds via applyCheckpoint).
-      // If neither is determinable, SKIP — trust the checkpoint. A genuinely-new move
-      // missed here is recovered by the next sync; a duplicated disc would corrupt the
-      // board permanently (it gets persisted into the next checkpoint).
-      const isNew = (s && s > baseSeq) || (mid && !appliedMoveIds.has(mid));
-      if (!isNew) continue;
-      if (replayTail(a)) break;
+    // A checkpoint may still lag while its async write is in flight; those actions
+    // live in the tail and are applied below.
+    applyCheckpoint(cp);                 // base board + current + dedup watermarks
+    // Legacy checkpoints did not carry seq. Disc count is a safe fallback only for
+    // those old snapshots; modern checkpoints may include non-move rematch actions.
+    if (!(Number(cp.seq) > 0)) lastAppliedSeq = Math.max(lastAppliedSeq, discCount(board));
+    for (const action of storedActions) {
+      const seq = Number(action.sequence) || 0;
+      const id = storedActionId(action);
+      if (!seq && !id) continue; // checkpoint already wins; unprovable inclusive item
+      replayStoredAction(action);
     }
     finalizeSyncRender();
+    reconcilePendingMove();
     return;
   }
 
-  // No checkpoint yet (early game, host hasn't checkpointed): the log IS the full
-  // history from move 1, so replay it from an empty board.
-  lastAppliedSeq = 0;
-  appliedMoveIds = new Set();
-  board = Array.from({ length: ROWS }, () => Array(COLS).fill(0));
-  current = 1;
-  gameOver = false;
-  lastWinnerPlayer = 0;
-  lastInsertedPos = null;
-  for (const a of moveActions) {
-    if (replayTail(a)) break;
-  }
+  // No checkpoint yet: the stored log is the full history. Replaying restart
+  // actions as well as moves makes every rematch recoverable.
+  resetBoardForReplay(0);
+  for (const action of storedActions) replayStoredAction(action);
   finalizeSyncRender();
+  reconcilePendingMove();
 }
 
 function onRealtime(data) {
+  if (data.player_id && data.player_id !== myId) lastNetworkProgressAt = Date.now();
   if (data.action_type === "player_info" && data.player_id !== myId) {
     if (data.action_data.name)   playerNames[data.player_id]   = data.action_data.name;
     if (data.action_data.avatar) playerAvatars[data.player_id] = data.action_data.avatar;
@@ -753,8 +885,7 @@ function onRealtime(data) {
 function onRematchRequest(data) {
   if (data.player_id === myId) return;
   if (rematchRequested) {
-    resetForRematch();
-    broadcastBoardSnapshot();
+    if (isHostPlayer()) commitRematchRestart();
     return;
   }
   rematchState = "requested";
@@ -763,10 +894,13 @@ function onRematchRequest(data) {
 
 
 function onGameRestarted() {
-  resetForRematch();
+  // Direct/older hosts may use the platform restart event, which resets its
+  // action sequence. The normal relay path uses our stored `restart` action.
+  lastSequence = 0;
+  resetForRematch(0);
 }
 
-function startOnlineGame() {
+function startOnlineGame(initialState) {
   isMultiplayer = true;
   waitingForOpponent = false;
 
@@ -778,9 +912,10 @@ function startOnlineGame() {
   hideWaiting();
   syncControlVisibility();
   init();
+  if (initialState && Array.isArray(initialState.board)) applyCheckpoint(initialState);
 
   // Always sync once at game start so a move sent during the join race is replayed.
-  Usion.game.requestSync(0);
+  requestAuthoritativeSync();
 }
 
 function updatePlayerDisplay() {
@@ -840,6 +975,7 @@ playBotBtn.addEventListener("click", () => {
   // the moment the friend arrives.
   isMultiplayer = false;
   pendingMove = false;
+  pendingMoveId = null;
   hideWaiting();
   syncControlVisibility();
   setPlayerDisplayBot();
@@ -855,30 +991,51 @@ function syncControlVisibility() {
 // ── Rematch ───────────────────────────────────────────────
 
 function requestRematch() {
+  if (restartPending || rematchRequested) return;
   rematchRequested = true;
   rematchState = "requested";
   syncRematchUi();
-  broadcastRematchState();
-  Usion.game.requestRematch();
+  const offerId = myId + ":" + sessionNonce + ":offer:" + (++rematchSerial);
+  Usion.game.action("rematch_offer", { offerId }).catch(() => {
+    rematchRequested = false;
+    rematchState = "idle";
+    syncRematchUi();
+    requestAuthoritativeSync();
+  });
 }
 
 function acceptRematch() {
   rematchRequested = true;
-  resetForRematch();
-  broadcastBoardSnapshot();
-  Usion.game.requestRematch();
+  rematchState = "requested";
+  syncRematchUi();
+  commitRematchRestart();
 }
 
-function resetForRematch() {
+function commitRematchRestart() {
+  if (restartPending) return;
+  restartPending = true;
+  const restartId = myId + ":" + sessionNonce + ":restart:" + (++rematchSerial);
+  Usion.game.action("restart", { restartId }).catch(() => {
+    restartPending = false;
+    requestAuthoritativeSync();
+  });
+}
+
+function resetForRematch(baseSeq, restartId) {
   rematchRequested = false;
   rematchState = "idle";
+  restartPending = false;
   pendingMove = false;
+  pendingMoveId = null;
   lastSnapshotVersion = 0;
   hideWinnerBanner();
   winnerPlayAgain.textContent = "Rematch";
   winnerPlayAgain.disabled = false;
   winnerPlayAgain.onclick = requestRematch;
   init();
+  if (restartId) appliedMoveIds.add(restartId);
+  lastAppliedSeq = Number(baseSeq) || 0;
+  if (lastAppliedSeq) lastSequence = Math.max(lastSequence, lastAppliedSeq);
 }
 
 
@@ -889,16 +1046,19 @@ function init() {
   current = 1;
   gameOver = false;
   pendingMove = false;
+  pendingMoveId = null;
   lastAppliedSeq = 0;
   appliedMoveIds = new Set();
   lastWinnerPlayer = 0;
   lastSnapshotVersion = 0;
   lastSnapshotVersionByPlayer = {};
   rematchState = "idle";
+  restartPending = false;
   lastInsertedPos = null;
   winRecordedThisGame = false;
   statsRecordedThisGame = false;
   resultReportedThisGame = false;
+  lastNetworkProgressAt = Date.now();
   clearForfeitGrace();
   hideWinnerBanner();
   renderBoard();
@@ -988,10 +1148,14 @@ boardEl.addEventListener("click", (e) => {
     // Stable per-tap id: survives SDK re-sends (same payload) and round-trips through
     // the echo + durable log + resync, so the move is applied exactly once everywhere.
     const moveId = myId + ":" + sessionNonce + ":" + (++moveSerial);
+    pendingMoveId = moveId;
     Usion.game.action("move", { col, moveId }).catch((err) => {
-      pendingMove = false;
+      if (pendingMoveId === moveId) {
+        pendingMove = false;
+        pendingMoveId = null;
+      }
       Usion.log("move send failed: " + (err && err.message ? err.message : err));
-      Usion.game.requestSync(0);
+      requestAuthoritativeSync();
     });
     return;
   }
@@ -1080,25 +1244,26 @@ function applyRematchState(payload) {
 // The checkpoint shape is a board snapshot (see getBoardSnapshot), so reuse the
 // same apply path used for realtime snapshots. Returns true if applied.
 function applyCheckpoint(state) {
-  if (!state || typeof state !== "object" || !Array.isArray(state.board)) return false;
+  if (!state || typeof state !== "object" || !isValidBoardState(state.board)) return false;
   isMultiplayer = true;
   // trusted=true: the onSync `game_state` is the SERVER's authoritative latest. Now
   // that BOTH players write checkpoints (actor-written), attributing every checkpoint
   // to the host id and applying the per-sender clock guard would let a skewed clock
   // drop a valid newer checkpoint. The server already resolved last-writer-wins, so
   // bypass the realtime ordering guard here.
-  applyBoardSnapshot(state, state.order && state.order[0] ? state.order[0] : (players[0] || "host"), true);
-  return true;
+  return applyBoardSnapshot(state, state.order && state.order[0] ? state.order[0] : (players[0] || "host"), true);
 }
 
 function applyBoardSnapshot(snapshot, senderId, trusted) {
+  if (!snapshot || !isValidBoardState(snapshot.board)) return false;
+  if (snapshot.seq !== undefined && Number(snapshot.seq) < lastAppliedSeq) return false;
   const version = Number(snapshot.version || 0);
   // Order snapshots per-sender: each sender's own clock is monotonic, so this
   // drops only genuinely out-of-order packets from THAT player. Comparing across
   // two devices' clocks (skew) used to drop valid moves and deadlock the game.
   // Skipped for `trusted` (server-authoritative checkpoint) snapshots.
   const prevFromSender = lastSnapshotVersionByPlayer[senderId] || 0;
-  if (!trusted && version && version < prevFromSender) return;
+  if (!trusted && version && version < prevFromSender) return false;
   if (senderId) lastSnapshotVersionByPlayer[senderId] = Math.max(prevFromSender, version);
   lastSnapshotVersion = Math.max(lastSnapshotVersion, version);
   // Adopt the sender's authoritative seat order so player 1/2 — and therefore
@@ -1109,26 +1274,23 @@ function applyBoardSnapshot(snapshot, senderId, trusted) {
     players = snapshot.order.slice();
     if (myId) myPlayer = players.indexOf(myId) + 1;
   }
-  if (Array.isArray(snapshot.board)) {
-    board = snapshot.board.map((row) => Array.isArray(row) ? row.slice() : Array(COLS).fill(0));
-  }
+  board = snapshot.board.map((row) => row.slice());
   // Adopt the dedup watermarks the snapshot/checkpoint carries. This is THE fix for
   // the host-resume phantom: the checkpoint bakes its moves into `board`, and the
   // INCLUSIVE sync tail re-sends the checkpoint's own last move — so unless we know
   // those moves are "already applied", onSync replays them again and stacks a
   // duplicate disc (seen only on the device returning from background, since it is
-  // the one that re-syncs). A fresh/empty board (rematch) has no watermarks → reset.
-  if (discCount(board) === 0 && !snapshot.gameOver) {
-    lastAppliedSeq = 0; appliedMoveIds = new Set();
-  } else {
-    appliedMoveIds = new Set(Array.isArray(snapshot.moveIds) ? snapshot.moveIds : []);
-    lastAppliedSeq = Number(snapshot.seq) || lastAppliedSeq;
+  // the one that re-syncs). An empty rematch board still carries a non-zero
+  // restart sequence; preserving it prevents old-match actions from leaking in.
+  appliedMoveIds = new Set(Array.isArray(snapshot.moveIds) ? snapshot.moveIds : []);
+  if (snapshot.seq !== undefined && snapshot.seq !== null) {
+    lastAppliedSeq = Number(snapshot.seq) || 0;
   }
   current = snapshot.current === 2 ? 2 : 1;
   gameOver = !!snapshot.gameOver;
   lastWinnerPlayer = snapshot.lastWinnerPlayer === 2 ? 2 : (snapshot.lastWinnerPlayer === 1 ? 1 : 0);
   rematchState = ["idle", "requested"].includes(snapshot.rematchState) ? snapshot.rematchState : rematchState;
-  pendingMove = false;
+  reconcilePendingMove();
   if (snapshot.lastInsertedPos && typeof snapshot.lastInsertedPos.r === "number") {
     lastInsertedPos = snapshot.lastInsertedPos;
   } else {
@@ -1160,6 +1322,7 @@ function applyBoardSnapshot(snapshot, senderId, trusted) {
   } else {
     updateStatus();
   }
+  return true;
 }
 
 
