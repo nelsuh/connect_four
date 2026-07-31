@@ -38,6 +38,35 @@ test("normal alternating moves stay identical on both clients", async () => {
   eq(host.snap().current, 2);
 });
 
+test("quick chat uses the requested phrases and reaches the opponent without changing play", async () => {
+  const { world, host, guest } = await onlinePair();
+  const expected = [
+    "юм авцаан",
+    "чи болчихжээ",
+    "би болчихжээ",
+    "хурдлаад өгөөрэй",
+    "муу юм бэ",
+    "амтагдахгүй юм байна дөө",
+    "EASY!",
+    "GG!",
+  ];
+  const buttons = host.doc.querySelectorAll(".chat-phrase");
+  eq(Array.from(buttons).map((button) => button.textContent), expected, "picker phrases");
+  ok(host.doc.getElementById("chatToggle").classList.contains("show-btn"), "chat is available in game");
+
+  const beforeHost = host.snap();
+  const beforeGuest = guest.snap();
+  buttons[3].dispatch("click");
+  await world.advance(300);
+
+  eq(host.doc.querySelectorAll(".reaction-bubble").length, 1, "sender sees their bubble");
+  eq(guest.doc.querySelectorAll(".reaction-bubble").length, 1, "opponent receives the bubble");
+  eq(host.snap().board, beforeHost.board, "sender board is unchanged");
+  eq(guest.snap().board, beforeGuest.board, "opponent board is unchanged");
+  eq(host.snap().current, beforeHost.current, "sender turn is unchanged");
+  eq(guest.snap().current, beforeGuest.current, "opponent turn is unchanged");
+});
+
 test("a rejoining client hydrates a checkpoint even when join sequence is equal", async () => {
   const { world, host, guest, roster } = await onlinePair();
   await play(world, host, 2);

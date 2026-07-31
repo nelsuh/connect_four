@@ -1,4 +1,14 @@
 const ROWS = 6, COLS = 7;
+const QUICK_CHAT_PHRASES = [
+  "юм авцаан",
+  "чи болчихжээ",
+  "би болчихжээ",
+  "хурдлаад өгөөрэй",
+  "муу юм бэ",
+  "амтагдахгүй юм байна дөө",
+  "EASY!",
+  "GG!",
+];
 
 // ── Game state ────────────────────────────────────────────
 let board = [];
@@ -76,6 +86,10 @@ const player1Name      = document.getElementById("player1Name");
 const player2Name      = document.getElementById("player2Name");
 const player1WinsEl    = document.querySelector("#player1Wins span");
 const player2WinsEl    = document.querySelector("#player2Wins span");
+const chatToggle       = document.getElementById("chatToggle");
+const chatPicker       = document.getElementById("chatPicker");
+const chatPhrases      = document.getElementById("chatPhrases");
+const reactionLayer    = document.getElementById("reactionLayer");
 
 // All-time win counts vs the current opponent (multiplayer only),
 // indexed by player slot (1-based: [_, p1, p2]). Persisted in localStorage.
@@ -864,6 +878,13 @@ function onSync(data) {
 
 function onRealtime(data) {
   if (data.player_id && data.player_id !== myId) lastNetworkProgressAt = Date.now();
+  if (data.action_type === "quick_chat" && data.player_id !== myId) {
+    const phrase = data.action_data && data.action_data.phrase;
+    const player = players.indexOf(data.player_id) + 1;
+    if (player > 0 && QUICK_CHAT_PHRASES.includes(phrase)) showQuickChatBubble(player, phrase);
+    return;
+  }
+
   if (data.action_type === "player_info" && data.player_id !== myId) {
     if (data.action_data.name)   playerNames[data.player_id]   = data.action_data.name;
     if (data.action_data.avatar) playerAvatars[data.player_id] = data.action_data.avatar;
@@ -947,6 +968,7 @@ function setPlayerDisplayBot() {
 function showWaiting() {
   waitingForOpponent = true;
   waitingOverlay.classList.add("show");
+  updateChatButton();
   // The invite button opens the platform's friend/group picker (Usion.game.invite)
   // — never a custom UI. The host's top-bar Share button does the same; both are
   // the platform's. Show it only when the SDK actually supports invite().
@@ -958,6 +980,7 @@ function showWaiting() {
 
 function hideWaiting() {
   waitingOverlay.classList.remove("show");
+  updateChatButton();
 }
 
 if (inviteBtn) {
@@ -1064,7 +1087,94 @@ function init() {
   renderBoard();
   updateStatus();
   updateWinCounts();
+  updateChatButton();
 }
+
+// ── Quick chat ───────────────────────────────────────────
+// Realtime-only and cosmetic: messages never enter the durable action log or
+// alter the board/turn state.
+let chatOpen = false;
+let lastQuickChatAt = 0;
+
+function buildQuickChatPicker() {
+  if (!chatPhrases) return;
+  chatPhrases.innerHTML = "";
+  QUICK_CHAT_PHRASES.forEach((phrase) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "chat-phrase";
+    button.textContent = phrase;
+    button.addEventListener("click", () => sendQuickChat(phrase));
+    chatPhrases.appendChild(button);
+  });
+}
+
+function setChatPickerOpen(open) {
+  chatOpen = Boolean(open);
+  if (chatPicker) {
+    chatPicker.classList.toggle("show", chatOpen);
+    chatPicker.setAttribute("aria-hidden", String(!chatOpen));
+  }
+  if (chatToggle) chatToggle.setAttribute("aria-expanded", String(chatOpen));
+}
+
+function updateChatButton() {
+  if (!chatToggle) return;
+  const show = !waitingOverlay.classList.contains("show") && board.length === ROWS;
+  chatToggle.classList.toggle("show-btn", show);
+  if (!show && chatOpen) setChatPickerOpen(false);
+}
+
+function sendQuickChat(phrase) {
+  setChatPickerOpen(false);
+  if (!QUICK_CHAT_PHRASES.includes(phrase)) return;
+  const now = Date.now();
+  if (now - lastQuickChatAt < 700) return;
+  lastQuickChatAt = now;
+
+  const player = myPlayer || 1;
+  showQuickChatBubble(player, phrase);
+  if (isMultiplayer && window.Usion && Usion.game && Usion.game.realtime) {
+    try { Usion.game.realtime("quick_chat", { phrase }); } catch (_) {}
+  }
+}
+
+function showQuickChatBubble(player, phrase) {
+  if (!reactionLayer || !QUICK_CHAT_PHRASES.includes(phrase)) return;
+  const anchor = document.getElementById(player === 2 ? "player2Panel" : "player1Panel");
+  if (!anchor) return;
+
+  const rect = anchor.getBoundingClientRect();
+  const bubble = document.createElement("div");
+  bubble.className = "reaction-bubble player-" + player;
+  bubble.textContent = phrase;
+  reactionLayer.appendChild(bubble);
+
+  const width = bubble.offsetWidth;
+  const height = bubble.offsetHeight;
+  const centeredLeft = rect.left + rect.width / 2 - width / 2;
+  bubble.style.left = Math.max(8, Math.min(centeredLeft, window.innerWidth - width - 8)) + "px";
+  bubble.style.top = (rect.top > height + 14 ? rect.top - height - 8 : rect.bottom + 8) + "px";
+
+  requestAnimationFrame(() => bubble.classList.add("pop"));
+  setTimeout(() => bubble.classList.add("out"), 1900);
+  setTimeout(() => bubble.remove(), 2350);
+}
+
+if (chatToggle) {
+  chatToggle.addEventListener("click", (event) => {
+    event.stopPropagation();
+    setChatPickerOpen(!chatOpen);
+  });
+}
+if (chatPicker) chatPicker.addEventListener("click", (event) => event.stopPropagation());
+document.addEventListener("click", () => {
+  if (chatOpen) setChatPickerOpen(false);
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && chatOpen) setChatPickerOpen(false);
+});
+buildQuickChatPicker();
 
 
 let lastInsertedPos = null; // {r, c} of the most recently placed disk

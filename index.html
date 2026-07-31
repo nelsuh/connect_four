@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Connect 4</title>
 <link rel="stylesheet" href="https://usions.com/usion-design-system.css">
-<link rel="stylesheet" href="style.css?v=12">
+<link rel="stylesheet" href="style.css?v=13">
 </head>
 
 <body>
@@ -55,6 +55,17 @@
 
 </div>
 
+<!-- Quick chat -->
+<button id="chatToggle" class="chat-toggle" type="button"
+  aria-label="Түргэн чат" aria-expanded="false" aria-controls="chatPicker">💬</button>
+<div id="chatPicker" class="chat-picker" aria-hidden="true">
+  <div class="chat-picker-title">Түргэн чат</div>
+  <div class="chat-phrases" id="chatPhrases"></div>
+</div>
+
+<!-- Cosmetic speech bubbles anchored to each player's panel -->
+<div id="reactionLayer" class="reaction-layer" aria-live="polite"></div>
+
 <!-- Waiting Overlay -->
 <div id="waitingOverlay" class="waiting-overlay">
   <div class="waiting-card">
@@ -66,7 +77,7 @@
 </div>
 
 <script src="https://usions.com/usion-sdk.js"></script>
-<script src="script.js?v=16"></script>
+<script src="script.js?v=17"></script>
 
 </body>
 </html>
