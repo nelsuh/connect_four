@@ -49,6 +49,7 @@ test("quick chat uses the requested phrases and reaches the opponent without cha
     "амтагдахгүй юм байна дөө",
     "EASY!",
     "GG!",
+    "Өөрийн мессеж",
   ];
   const buttons = host.doc.querySelectorAll(".chat-phrase");
   eq(Array.from(buttons).map((button) => button.textContent), expected, "picker phrases");
@@ -65,6 +66,19 @@ test("quick chat uses the requested phrases and reaches the opponent without cha
   eq(guest.snap().board, beforeGuest.board, "opponent board is unchanged");
   eq(host.snap().current, beforeHost.current, "sender turn is unchanged");
   eq(guest.snap().current, beforeGuest.current, "opponent turn is unchanged");
+});
+
+test("custom quick chat opens the composer and synchronizes typed text", async () => {
+  const { world, host, guest } = await onlinePair();
+  host.doc.getElementById("chatToggle").dispatch("click");
+  host.doc.querySelectorAll(".chat-custom-toggle")[0].dispatch("click");
+  eq(host.doc.getElementById("customChatForm").hidden, false, "custom composer opens");
+  host.doc.getElementById("customChatInput").value = "  Great   match!  ";
+  host.doc.getElementById("customChatForm").dispatch("submit");
+  await world.advance(300);
+
+  eq(host.doc.querySelectorAll(".reaction-bubble")[0].textContent, "Great match!", "sender sees normalized custom text");
+  eq(guest.doc.querySelectorAll(".reaction-bubble")[0].textContent, "Great match!", "opponent receives custom text");
 });
 
 test("a rejoining client hydrates a checkpoint even when join sequence is equal", async () => {

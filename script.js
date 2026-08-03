@@ -9,6 +9,7 @@ const QUICK_CHAT_PHRASES = [
   "EASY!",
   "GG!",
 ];
+const MAX_CHAT_LENGTH = 80;
 
 // ── Game state ────────────────────────────────────────────
 let board = [];
@@ -89,6 +90,9 @@ const player2WinsEl    = document.querySelector("#player2Wins span");
 const chatToggle       = document.getElementById("chatToggle");
 const chatPicker       = document.getElementById("chatPicker");
 const chatPhrases      = document.getElementById("chatPhrases");
+const customChatForm   = document.getElementById("customChatForm");
+const customChatBack   = document.getElementById("customChatBack");
+const customChatInput  = document.getElementById("customChatInput");
 const reactionLayer    = document.getElementById("reactionLayer");
 
 // All-time win counts vs the current opponent (multiplayer only),
@@ -879,9 +883,9 @@ function onSync(data) {
 function onRealtime(data) {
   if (data.player_id && data.player_id !== myId) lastNetworkProgressAt = Date.now();
   if (data.action_type === "quick_chat" && data.player_id !== myId) {
-    const phrase = data.action_data && data.action_data.phrase;
+    const phrase = normalizeChatMessage(data.action_data && data.action_data.phrase);
     const player = players.indexOf(data.player_id) + 1;
-    if (player > 0 && QUICK_CHAT_PHRASES.includes(phrase)) showQuickChatBubble(player, phrase);
+    if (player > 0 && phrase) showQuickChatBubble(player, phrase);
     return;
   }
 
@@ -1094,7 +1098,14 @@ function init() {
 // Realtime-only and cosmetic: messages never enter the durable action log or
 // alter the board/turn state.
 let chatOpen = false;
+let customChatOpen = false;
 let lastQuickChatAt = 0;
+
+function normalizeChatMessage(value) {
+  if (typeof value !== "string") return "";
+  const message = value.trim().replace(/\s+/g, " ");
+  return message && message.length <= MAX_CHAT_LENGTH ? message : "";
+}
 
 function buildQuickChatPicker() {
   if (!chatPhrases) return;
@@ -1107,10 +1118,48 @@ function buildQuickChatPicker() {
     button.addEventListener("click", () => sendQuickChat(phrase));
     chatPhrases.appendChild(button);
   });
+  const customButton = document.createElement("button");
+  customButton.type = "button";
+  customButton.id = "customChatToggle";
+  customButton.className = "chat-phrase chat-custom-toggle";
+  customButton.textContent = "Өөрийн мессеж";
+  customButton.setAttribute("aria-controls", "customChatForm");
+  customButton.setAttribute("aria-expanded", String(customChatOpen));
+  customButton.addEventListener("click", () => setCustomChatOpen(true, true));
+  chatPhrases.appendChild(customButton);
+}
+
+function updateChatKeyboardInset() {
+  if (!chatPicker || !customChatOpen || !window.visualViewport) return;
+  const visualBottom = window.visualViewport.height + window.visualViewport.offsetTop;
+  const covered = Math.max(0, Math.min(window.innerHeight * 0.7, window.innerHeight - visualBottom));
+  setChatKeyboardInset(Math.round(covered) + "px");
+}
+
+function setChatKeyboardInset(value) {
+  if (!chatPicker) return;
+  if (typeof chatPicker.style.setProperty === "function") chatPicker.style.setProperty("--chat-keyboard-inset", value);
+  else chatPicker.style["--chat-keyboard-inset"] = value;
+}
+
+function setCustomChatOpen(open, focusInput) {
+  customChatOpen = Boolean(open);
+  if (chatPicker) chatPicker.classList.toggle("custom-mode", customChatOpen);
+  if (chatToggle) chatToggle.classList.toggle("custom-mode", customChatOpen);
+  if (customChatForm) customChatForm.hidden = !customChatOpen;
+  const customButton = document.getElementById("customChatToggle");
+  if (customButton) customButton.setAttribute("aria-expanded", String(customChatOpen));
+  if (!customChatOpen && customChatInput && document.activeElement === customChatInput) customChatInput.blur();
+  if (customChatOpen && focusInput && customChatInput) {
+    try { customChatInput.focus({ preventScroll: true }); } catch (_) { customChatInput.focus(); }
+    updateChatKeyboardInset();
+  }
+  if (!customChatOpen) setChatKeyboardInset("0px");
 }
 
 function setChatPickerOpen(open) {
   chatOpen = Boolean(open);
+  if (!chatOpen) setCustomChatOpen(false, false);
   if (chatPicker) {
     chatPicker.classList.toggle("show", chatOpen);
     chatPicker.setAttribute("aria-hidden", String(!chatOpen));
@@ -1125,22 +1174,25 @@ function updateChatButton() {
   if (!show && chatOpen) setChatPickerOpen(false);
 }
 
-function sendQuickChat(phrase) {
-  setChatPickerOpen(false);
-  if (!QUICK_CHAT_PHRASES.includes(phrase)) return;
+function sendQuickChat(value) {
+  const phrase = normalizeChatMessage(value);
+  if (!phrase) return false;
   const now = Date.now();
-  if (now - lastQuickChatAt < 700) return;
+  if (now - lastQuickChatAt < 700) return false;
   lastQuickChatAt = now;
+  setChatPickerOpen(false);
 
   const player = myPlayer || 1;
   showQuickChatBubble(player, phrase);
   if (isMultiplayer && window.Usion && Usion.game && Usion.game.realtime) {
     try { Usion.game.realtime("quick_chat", { phrase }); } catch (_) {}
   }
+  return true;
 }
 
-function showQuickChatBubble(player, phrase) {
-  if (!reactionLayer || !QUICK_CHAT_PHRASES.includes(phrase)) return;
+function showQuickChatBubble(player, value) {
+  const phrase = normalizeChatMessage(value);
+  if (!reactionLayer || !phrase) return;
   const anchor = document.getElementById(player === 2 ? "player2Panel" : "player1Panel");
   if (!anchor) return;
 
@@ -1168,12 +1220,21 @@ if (chatToggle) {
   });
 }
 if (chatPicker) chatPicker.addEventListener("click", (event) => event.stopPropagation());
+if (customChatBack) customChatBack.addEventListener("click", () => setCustomChatOpen(false, false));
+if (customChatForm) customChatForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  if (customChatInput && sendQuickChat(customChatInput.value)) customChatInput.value = "";
+});
 document.addEventListener("click", () => {
   if (chatOpen) setChatPickerOpen(false);
 });
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && chatOpen) setChatPickerOpen(false);
 });
+if (window.visualViewport) {
+  window.visualViewport.addEventListener("resize", updateChatKeyboardInset);
+  window.visualViewport.addEventListener("scroll", updateChatKeyboardInset);
+}
 buildQuickChatPicker();
 
 
