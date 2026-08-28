@@ -2,60 +2,94 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Connect 4</title>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#13233f">
+<title>Pocket Four</title>
 <link rel="stylesheet" href="https://usions.com/usion-design-system.css">
-<link rel="stylesheet" href="style.css?v=14">
+<link rel="stylesheet" href="style.css?v=20">
 </head>
 
 <body>
 
-<div class="phone">
+<div class="room-glow room-glow-one" aria-hidden="true"></div>
+<div class="room-glow room-glow-two" aria-hidden="true"></div>
 
-  <div class="topbar">
-
-    <div class="player left" id="player1Panel">
-      <img id="player1Avatar" src="https://api.dicebear.com/7.x/bottts/svg?seed=red">
-      <div class="name" id="player1Name">Red</div>
-      <div class="wins" id="player1Wins">Wins: <span>0</span></div>
+<main class="phone game-shell">
+  <header class="game-heading">
+    <div>
+      <p class="game-kicker">A tiny tabletop duel</p>
+      <h1>Pocket Four</h1>
     </div>
+    <button id="tokenEditBtn" class="token-edit-btn" type="button" aria-label="Choose a token pair">
+      <span class="token-edit-stack" aria-hidden="true">
+        <img id="tokenEditPreview1" src="assets/tokens/whisker-rivals-1.png" alt="">
+        <img id="tokenEditPreview2" src="assets/tokens/whisker-rivals-2.png" alt="">
+      </span>
+      <span>Tokens</span>
+    </button>
+  </header>
 
-    <div class="vs">VS</div>
+  <section class="topbar" aria-label="Players">
+    <article class="player left" id="player1Panel">
+      <div class="player-portrait">
+        <img id="player1Avatar" src="assets/tokens/whisker-rivals-1.png" alt="Player one avatar">
+        <span class="presence-dot" aria-hidden="true"></span>
+      </div>
+      <div class="player-copy">
+        <span class="seat-label">Blue side</span>
+        <div class="name" id="player1Name">You</div>
+        <div class="wins" id="player1Wins">Wins <span>0</span></div>
+      </div>
+      <img class="player-token" id="player1Token" src="assets/tokens/whisker-rivals-1.png" alt="Player one token">
+    </article>
 
-    <div class="player right" id="player2Panel">
-      <img id="player2Avatar" src="https://api.dicebear.com/7.x/bottts/svg?seed=yellow">
-      <div class="name" id="player2Name">Yellow</div>
-      <div class="wins" id="player2Wins">Wins: <span>0</span></div>
+    <div class="versus-mark" aria-hidden="true"><span>VS</span></div>
+
+    <article class="player right" id="player2Panel">
+      <img class="player-token" id="player2Token" src="assets/tokens/whisker-rivals-2.png" alt="Player two token">
+      <div class="player-copy player-copy-right">
+        <span class="seat-label">Coral side</span>
+        <div class="name" id="player2Name">Bot</div>
+        <div class="wins" id="player2Wins">Wins <span>0</span></div>
+      </div>
+      <div class="player-portrait">
+        <img id="player2Avatar" src="assets/tokens/whisker-rivals-2.png" alt="Player two avatar">
+        <span class="presence-dot" aria-hidden="true"></span>
+      </div>
+    </article>
+  </section>
+
+  <div class="turn-indicator" id="status" role="status" aria-live="polite">Your turn</div>
+
+  <section class="board-stage" aria-label="Four in a row game board">
+    <div class="board-lip" aria-hidden="true">
+      <span></span><span></span><span></span><span></span><span></span><span></span><span></span>
     </div>
+    <div id="board"></div>
+    <div class="board-foot" aria-hidden="true"><span></span><span></span></div>
+  </section>
 
-  </div>
-
-  <div class="turnIndicator" id="status">Your Turn</div>
-
-  <div id="board"></div>
-
-  <!-- Winner Banner (non-blocking, shows below board until rematch / exit) -->
   <div id="winnerBanner" class="winner-banner" hidden>
     <span class="winner-banner-emoji" id="winnerEmoji">🏆</span>
-    <span class="winner-banner-text"><strong id="winnerNameDisplay">Red</strong> wins!</span>
+    <span class="winner-banner-text"><strong id="winnerNameDisplay">Player</strong> wins the shelf!</span>
     <div class="winner-banner-actions">
-      <button class="winner-btn" id="winnerPlayAgain">Rematch</button>
+      <button class="winner-btn" id="winnerPlayAgain" type="button">Rematch</button>
     </div>
   </div>
 
   <div class="controls">
-
-    <select id="difficulty">
-      <option value="1">Easy</option>
-      <option value="3">Medium</option>
-      <option value="5">Hard</option>
-    </select>
-
+    <label class="difficulty-control" id="difficultyControl">
+      <span>Bot level</span>
+      <select id="difficulty">
+        <option value="1">Easy</option>
+        <option value="3">Medium</option>
+        <option value="5">Hard</option>
+      </select>
+    </label>
+    <p class="board-tip">Tap any open column to drop your token.</p>
   </div>
+</main>
 
-</div>
-
-<!-- Quick chat -->
 <button id="chatToggle" class="chat-toggle" type="button"
   aria-label="Түргэн чат" aria-expanded="false" aria-controls="chatPicker">💬</button>
 <div id="chatPicker" class="chat-picker" aria-hidden="true">
@@ -69,21 +103,45 @@
   </form>
 </div>
 
-<!-- Cosmetic speech bubbles anchored to each player's panel -->
 <div id="reactionLayer" class="reaction-layer" aria-live="polite"></div>
 
-<!-- Waiting Overlay -->
-<div id="waitingOverlay" class="waiting-overlay">
-  <div class="waiting-card">
-    <div class="waiting-spinner"></div>
-    <p class="waiting-text">Waiting for opponent…</p>
-    <button class="waiting-invite-btn hidden" id="inviteBtn">Invite a friend</button>
-    <button class="waiting-bot-btn" id="playBotBtn">Play vs Bot instead</button>
-  </div>
+<div id="waitingOverlay" class="waiting-overlay" aria-hidden="true">
+  <section class="waiting-card" role="dialog" aria-modal="true" aria-labelledby="prepTitle">
+    <header class="prep-header">
+      <div>
+        <p class="prep-kicker">Match preparation</p>
+        <h2 id="prepTitle">Choose your token pair</h2>
+        <p id="prepSubtitle">Pick a set now. Your seat decides which side you play.</p>
+      </div>
+      <button id="tokenPickerClose" class="picker-close" type="button" aria-label="Close token picker">×</button>
+    </header>
+
+    <div id="tokenSetGrid" class="token-set-grid" role="radiogroup" aria-label="Token pairs"></div>
+
+    <footer class="prep-footer">
+      <div class="selected-pair" aria-live="polite">
+        <span class="selected-pair-label">Selected</span>
+        <strong id="selectedTokenName">Whisker Rivals</strong>
+      </div>
+      <button id="tokenConfirmBtn" class="confirm-token-btn" type="button">Use this pair</button>
+    </footer>
+
+    <div class="lobby-wait" id="lobbyWait">
+      <div class="waiting-spinner" aria-hidden="true"></div>
+      <div>
+        <p class="waiting-text">Waiting for opponent…</p>
+        <p class="waiting-note">You can keep browsing while the room fills.</p>
+      </div>
+      <div class="waiting-actions">
+        <button class="waiting-invite-btn hidden" id="inviteBtn" type="button">Invite a friend</button>
+        <button class="waiting-bot-btn" id="playBotBtn" type="button">Play the bot</button>
+      </div>
+    </div>
+  </section>
 </div>
 
 <script src="https://usions.com/usion-sdk.js"></script>
-<script src="script.js?v=18"></script>
+<script src="script.js?v=23"></script>
 
 </body>
 </html>

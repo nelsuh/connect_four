@@ -11,10 +11,42 @@ const QUICK_CHAT_PHRASES = [
 ];
 const MAX_CHAT_LENGTH = 80;
 
+// Every collectible is a coordinated two-sided set. The selected set always
+// styles the whole board: slot 1 gets its cyan token and slot 2 its coral rival.
+const TOKEN_SETS = [
+  { id: "whisker-rivals", name: "Whisker Rivals", sides: ["assets/tokens/whisker-rivals-1.png", "assets/tokens/whisker-rivals-2.png"] },
+  { id: "pup-parade", name: "Pup Parade", sides: ["assets/tokens/pup-parade-1.png", "assets/tokens/pup-parade-2.png"] },
+  { id: "bamboo-buddies", name: "Bamboo Buddies", sides: ["assets/tokens/bamboo-buddies-1.png", "assets/tokens/bamboo-buddies-2.png"] },
+  { id: "fox-and-frost", name: "Fox & Frost", sides: ["assets/tokens/fox-and-frost-1.png", "assets/tokens/fox-and-frost-2.png"] },
+  { id: "bunny-hop", name: "Bunny Hop", sides: ["assets/tokens/bunny-hop-1.png", "assets/tokens/bunny-hop-2.png"] },
+  { id: "pond-pals", name: "Pond Pals", sides: ["assets/tokens/pond-pals-1.png", "assets/tokens/pond-pals-2.png"] },
+  { id: "bubble-axolotls", name: "Bubble Axolotls", sides: ["assets/tokens/bubble-axolotls-1.png", "assets/tokens/bubble-axolotls-2.png"] },
+  { id: "forest-bandits", name: "Forest Bandits", sides: ["assets/tokens/forest-bandits-1.png", "assets/tokens/forest-bandits-2.png"] },
+  { id: "polar-pals", name: "Polar Pals", sides: ["assets/tokens/polar-pals-1.png", "assets/tokens/polar-pals-2.png"] },
+  { id: "honey-and-moon", name: "Honey & Moon", sides: ["assets/tokens/honey-and-moon-1.png", "assets/tokens/honey-and-moon-2.png"] },
+];
+const DEFAULT_TOKEN_SET_ID = TOKEN_SETS[0].id;
+const TOKEN_STORAGE_KEY = "c4:token-set";
+
+function isTokenSetId(value) {
+  return TOKEN_SETS.some((set) => set.id === value);
+}
+
+function loadSavedTokenSetId() {
+  try {
+    const saved = localStorage.getItem(TOKEN_STORAGE_KEY);
+    if (isTokenSetId(saved)) return saved;
+  } catch (_) {}
+  return DEFAULT_TOKEN_SET_ID;
+}
+
 // ── Game state ────────────────────────────────────────────
 let board = [];
 let current = 1;      // 1 = Red, 2 = Yellow
 let gameOver = false;
+let selectedTokenSetId = loadSavedTokenSetId();
+let playerTokenSets = {};
+let tokenChoiceConfirmed = false;
 
 // ── Multiplayer state ─────────────────────────────────────
 let myId = null;
@@ -66,6 +98,7 @@ let lastNetworkProgressAt = Date.now();
 const boardEl          = document.getElementById("board");
 const statusEl         = document.getElementById("status");
 const diffSelect       = document.getElementById("difficulty");
+const difficultyControl= document.getElementById("difficultyControl");
 const winnerBanner     = document.getElementById("winnerBanner");
 const winnerNameDisplay= document.getElementById("winnerNameDisplay");
 const winnerEmoji      = document.getElementById("winnerEmoji");
@@ -85,6 +118,17 @@ const player1Avatar    = document.getElementById("player1Avatar");
 const player2Avatar    = document.getElementById("player2Avatar");
 const player1Name      = document.getElementById("player1Name");
 const player2Name      = document.getElementById("player2Name");
+const player1Token     = document.getElementById("player1Token");
+const player2Token     = document.getElementById("player2Token");
+const tokenEditBtn     = document.getElementById("tokenEditBtn");
+const tokenEditPreview1= document.getElementById("tokenEditPreview1");
+const tokenEditPreview2= document.getElementById("tokenEditPreview2");
+const tokenSetGrid     = document.getElementById("tokenSetGrid");
+const selectedTokenName= document.getElementById("selectedTokenName");
+const tokenConfirmBtn  = document.getElementById("tokenConfirmBtn");
+const tokenPickerClose = document.getElementById("tokenPickerClose");
+const prepTitle        = document.getElementById("prepTitle");
+const prepSubtitle     = document.getElementById("prepSubtitle");
 const player1WinsEl    = document.querySelector("#player1Wins span");
 const player2WinsEl    = document.querySelector("#player2Wins span");
 const chatToggle       = document.getElementById("chatToggle");
@@ -94,6 +138,136 @@ const customChatForm   = document.getElementById("customChatForm");
 const customChatBack   = document.getElementById("customChatBack");
 const customChatInput  = document.getElementById("customChatInput");
 const reactionLayer    = document.getElementById("reactionLayer");
+
+function tokenSetById(id) {
+  return TOKEN_SETS.find((set) => set.id === id) || TOKEN_SETS[0];
+}
+
+function tokenSetIdForSlot(slot) {
+  // A catalog card is one complete versus set, never two mix-and-match skins.
+  // Multiplayer players can keep their own cosmetic preference locally, while
+  // both sides of that board always remain a coordinated pair.
+  return selectedTokenSetId;
+}
+
+function tokenAssetForSlot(slot) {
+  return tokenSetById(tokenSetIdForSlot(slot)).sides[slot === 2 ? 1 : 0];
+}
+
+function updateTokenSurfaces() {
+  const sideOne = tokenAssetForSlot(1);
+  const sideTwo = tokenAssetForSlot(2);
+  if (player1Token) player1Token.src = sideOne;
+  if (player2Token) player2Token.src = sideTwo;
+  const ownSet = tokenSetById(selectedTokenSetId);
+  if (tokenEditPreview1) tokenEditPreview1.src = ownSet.sides[0];
+  if (tokenEditPreview2) tokenEditPreview2.src = ownSet.sides[1];
+}
+
+function refreshTokenPickerSelection() {
+  const selected = tokenSetById(selectedTokenSetId);
+  if (selectedTokenName) selectedTokenName.textContent = selected.name;
+  if (!tokenSetGrid) return;
+  Array.from(tokenSetGrid.children || []).forEach((card) => {
+    card.setAttribute("aria-checked", String(card.dataset.tokenSet === selectedTokenSetId));
+  });
+}
+
+function announcePlayerProfile() {
+  if (!myId || !window.Usion || !Usion.game || !Usion.game.realtime) return;
+  try {
+    Usion.game.realtime("player_info", {
+      name: playerNames[myId],
+      avatar: playerAvatars[myId] || null,
+      tokenSet: selectedTokenSetId,
+    });
+  } catch (_) {}
+}
+
+function selectTokenSet(id, announce) {
+  if (!isTokenSetId(id)) return false;
+  selectedTokenSetId = id;
+  if (myId) playerTokenSets[myId] = id;
+  try { localStorage.setItem(TOKEN_STORAGE_KEY, id); } catch (_) {}
+  refreshTokenPickerSelection();
+  updateTokenSurfaces();
+  if (board.length === ROWS) renderBoard();
+  if (announce && isMultiplayer) {
+    try { Usion.game.realtime("token_choice", { tokenSet: id }); } catch (_) {}
+    announcePlayerProfile();
+  }
+  return true;
+}
+
+function buildTokenSetPicker() {
+  if (!tokenSetGrid) return;
+  tokenSetGrid.innerHTML = "";
+  TOKEN_SETS.forEach((set) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "token-set-card";
+    button.dataset.tokenSet = set.id;
+    button.setAttribute("role", "radio");
+    button.setAttribute("aria-checked", String(set.id === selectedTokenSetId));
+    button.setAttribute("aria-label", set.name + " paired tokens");
+
+    const pair = document.createElement("span");
+    pair.className = "token-card-pair";
+    set.sides.forEach((src, index) => {
+      const image = document.createElement("img");
+      image.src = src;
+      image.alt = index === 0 ? "Blue side" : "Coral side";
+      pair.appendChild(image);
+    });
+
+    const name = document.createElement("span");
+    name.className = "token-set-name";
+    name.textContent = set.name;
+    const sides = document.createElement("span");
+    sides.className = "token-set-sides";
+    sides.textContent = "Blue + Coral";
+    button.appendChild(pair);
+    button.appendChild(name);
+    button.appendChild(sides);
+    button.addEventListener("click", () => selectTokenSet(set.id, true));
+    tokenSetGrid.appendChild(button);
+  });
+  refreshTokenPickerSelection();
+  updateTokenSurfaces();
+}
+
+function showTokenPicker(phase) {
+  if (!waitingOverlay) return;
+  const nextPhase = phase || "picker";
+  waitingOverlay.classList.add("show");
+  waitingOverlay.setAttribute("aria-hidden", "false");
+  waitingOverlay.dataset.phase = nextPhase;
+  if (prepTitle) prepTitle.textContent = nextPhase === "waiting" ? "Pick a pair while we wait" : "Choose your token pair";
+  if (prepSubtitle) prepSubtitle.textContent = nextPhase === "ready"
+    ? "Your opponent is here. Choose a set, then start the match."
+    : "Choose one complete pair: Blue plays the left token and Coral the right.";
+  if (tokenConfirmBtn) tokenConfirmBtn.textContent = nextPhase === "ready" ? "Start with this pair" : "Use this pair";
+  refreshTokenPickerSelection();
+  updateChatButton();
+}
+
+function confirmTokenChoice() {
+  tokenChoiceConfirmed = true;
+  if (myId) playerTokenSets[myId] = selectedTokenSetId;
+  selectTokenSet(selectedTokenSetId, true);
+  if (waitingForOpponent) {
+    if (tokenConfirmBtn) tokenConfirmBtn.textContent = "Pair saved ✓";
+    return;
+  }
+  hideWaiting();
+}
+
+if (tokenConfirmBtn) tokenConfirmBtn.addEventListener("click", confirmTokenChoice);
+if (tokenEditBtn) tokenEditBtn.addEventListener("click", () => showTokenPicker("picker"));
+if (tokenPickerClose) tokenPickerClose.addEventListener("click", () => {
+  if (!waitingForOpponent) hideWaiting();
+});
+buildTokenSetPicker();
 
 // All-time win counts vs the current opponent (multiplayer only),
 // indexed by player slot (1-based: [_, p1, p2]). Persisted in localStorage.
@@ -283,10 +457,13 @@ function writeCheckpoint() {
 
 // ── Usion Init ────────────────────────────────────────────
 
+const usionSdkAvailable = Boolean(window.Usion && typeof Usion.init === "function");
+if (usionSdkAvailable) {
 Usion.init(async function(config) {
   myId = config.userId;
   playerNames[myId] = config.userName || "You";
   if (config.userAvatar) playerAvatars[myId] = config.userAvatar;
+  playerTokenSets[myId] = selectedTokenSetId;
   if (config.playerIds && config.playerIds.length) {
     canonicalRoster = config.playerIds.slice(); // platform roster — identical on every device, stable across reconnects
     players = canonicalRoster.slice();
@@ -315,6 +492,7 @@ Usion.init(async function(config) {
     init();
   }
 });
+}
 
 // Did the platform open us solo (Explore / Game hub) rather than a chat game
 // invite? Trust the launch MODE — never infer from roomId alone, since a solo
@@ -492,11 +670,8 @@ function onJoined(data) {
   if (data.sequence !== undefined) lastSequence = Number(data.sequence) || 0;
   lastNetworkProgressAt = Date.now();
 
-  // Announce our identity to the room
-  Usion.game.realtime("player_info", {
-    name: playerNames[myId],
-    avatar: playerAvatars[myId] || null
-  });
+  // Announce identity and the selected two-sided token set to the room.
+  announcePlayerProfile();
 
   if (connectedCount >= 2 && waitingForOpponent) {
     startOnlineGame(data.game_state);
@@ -526,11 +701,8 @@ function onPlayerJoined(data) {
   if (Array.isArray(data.player_ids) && data.player_ids.length >= 2) connectedCount = Math.max(connectedCount, 2);
   if (data.player && data.player.is_connected) connectedCount = Math.max(connectedCount, 2);
   lastNetworkProgressAt = Date.now();
-  // Re-broadcast our identity to the new joiner
-  Usion.game.realtime("player_info", {
-    name: playerNames[myId],
-    avatar: playerAvatars[myId] || null
-  });
+  // Re-broadcast our identity and cosmetics to the new joiner.
+  announcePlayerProfile();
   // Opponent came back during the forfeit grace window → cancel and resync.
   if (connectedCount >= 2 && forfeitTimer) {
     clearForfeitGrace();
@@ -811,8 +983,8 @@ function finalizeSyncRender() {
     }
     const winnerId = isMultiplayer ? players[lastWinnerPlayer - 1] : null;
     const name = isMultiplayer
-      ? playerLabelForStatus(winnerId, lastWinnerPlayer === 1 ? "Red" : "Yellow")
-      : (lastWinnerPlayer === 1 ? "Red" : "Yellow");
+      ? playerLabelForStatus(winnerId, lastWinnerPlayer === 1 ? "Blue" : "Coral")
+      : (lastWinnerPlayer === 1 ? "Blue" : "Coral");
     updateStatus("🎉 " + name + " wins!");
     showWinnerOverlay();
   } else if (gameOver) {
@@ -892,7 +1064,19 @@ function onRealtime(data) {
   if (data.action_type === "player_info" && data.player_id !== myId) {
     if (data.action_data.name)   playerNames[data.player_id]   = data.action_data.name;
     if (data.action_data.avatar) playerAvatars[data.player_id] = data.action_data.avatar;
+    if (isTokenSetId(data.action_data.tokenSet)) playerTokenSets[data.player_id] = data.action_data.tokenSet;
     updatePlayerDisplay();
+    renderBoard();
+    return;
+  }
+
+  if (data.action_type === "token_choice" && data.player_id !== myId) {
+    const tokenSet = data.action_data && data.action_data.tokenSet;
+    if (isTokenSetId(tokenSet)) {
+      playerTokenSets[data.player_id] = tokenSet;
+      updateTokenSurfaces();
+      renderBoard();
+    }
     return;
   }
 
@@ -934,10 +1118,11 @@ function startOnlineGame(initialState) {
   updatePlayerDisplay();
   setWinsVisibility(true);
   syncPlayerWinsFromStorage();
-  hideWaiting();
   syncControlVisibility();
   init();
   if (initialState && Array.isArray(initialState.board)) applyCheckpoint(initialState);
+  if (tokenChoiceConfirmed) hideWaiting();
+  else showTokenPicker("ready");
 
   // Always sync once at game start so a move sent during the join race is replayed.
   requestAuthoritativeSync();
@@ -957,22 +1142,24 @@ function updatePlayerDisplay() {
     player2Name.textContent = isMe ? "You" : (playerNames[p2id] || "Opponent");
     if (playerAvatars[p2id]) player2Avatar.src = playerAvatars[p2id];
   }
+  updateTokenSurfaces();
 }
 
 function setPlayerDisplayBot() {
   player1Name.textContent = playerNames[myId] || "You";
   player2Name.textContent = "Bot";
   if (playerAvatars[myId]) player1Avatar.src = playerAvatars[myId];
-  player2Avatar.src = "https://api.dicebear.com/7.x/bottts/svg?seed=bot";
+  player2Avatar.src = tokenAssetForSlot(2);
   setWinsVisibility(false);
+  updateTokenSurfaces();
 }
 
 // ── Waiting overlay ───────────────────────────────────────
 
 function showWaiting() {
   waitingForOpponent = true;
-  waitingOverlay.classList.add("show");
-  updateChatButton();
+  tokenChoiceConfirmed = false;
+  showTokenPicker("waiting");
   // The invite button opens the platform's friend/group picker (Usion.game.invite)
   // — never a custom UI. The host's top-bar Share button does the same; both are
   // the platform's. Show it only when the SDK actually supports invite().
@@ -984,6 +1171,7 @@ function showWaiting() {
 
 function hideWaiting() {
   waitingOverlay.classList.remove("show");
+  waitingOverlay.setAttribute("aria-hidden", "true");
   updateChatButton();
 }
 
@@ -1001,6 +1189,7 @@ playBotBtn.addEventListener("click", () => {
   // `onPlayerJoined` will purge this bot game and call `startOnlineGame()`
   // the moment the friend arrives.
   isMultiplayer = false;
+  tokenChoiceConfirmed = true;
   pendingMove = false;
   pendingMoveId = null;
   hideWaiting();
@@ -1012,7 +1201,8 @@ playBotBtn.addEventListener("click", () => {
 // ── Controls ──────────────────────────────────────────────
 
 function syncControlVisibility() {
-  diffSelect.style.display = isMultiplayer ? "none" : "";
+  if (difficultyControl) difficultyControl.style.display = isMultiplayer ? "none" : "";
+  else diffSelect.style.display = isMultiplayer ? "none" : "";
 }
 
 // ── Rematch ───────────────────────────────────────────────
@@ -1088,6 +1278,7 @@ function init() {
   lastNetworkProgressAt = Date.now();
   clearForfeitGrace();
   hideWinnerBanner();
+  updateTokenSurfaces();
   renderBoard();
   updateStatus();
   updateWinCounts();
@@ -1169,7 +1360,7 @@ function setChatPickerOpen(open) {
 
 function updateChatButton() {
   if (!chatToggle) return;
-  const show = !waitingOverlay.classList.contains("show") && board.length === ROWS;
+  const show = board.length === ROWS && (!waitingOverlay.classList.contains("show") || !waitingForOpponent);
   chatToggle.classList.toggle("show-btn", show);
   if (!show && chatOpen) setChatPickerOpen(false);
 }
@@ -1248,8 +1439,16 @@ function renderBoard() {
       cell.className = "cell";
       cell.dataset.row = r;
       cell.dataset.col = c;
+      cell.setAttribute("role", "button");
+      cell.setAttribute("aria-label", "Drop a token in column " + (c + 1));
+      cell.tabIndex = 0;
       if (board[r][c]) {
         cell.dataset.player = board[r][c];
+        const token = document.createElement("img");
+        token.className = "token-art";
+        token.src = tokenAssetForSlot(board[r][c]);
+        token.alt = "";
+        cell.appendChild(token);
         if (lastInsertedPos && lastInsertedPos.r === r && lastInsertedPos.c === c) {
           cell.classList.add("last-inserted");
         }
@@ -1282,18 +1481,26 @@ function updateStatus(text) {
     }
 
     const currentPlayerId = players[current - 1];
-    const currentPlayerName = playerLabelForStatus(currentPlayerId, current === 1 ? "Red" : "Yellow");
-    const color = current === 1 ? "#ff2e2e" : "#ffc400";
+    const currentPlayerName = playerLabelForStatus(currentPlayerId, current === 1 ? "Blue" : "Coral");
+    const color = current === 1 ? "#25bfe4" : "#ff6966";
     statusEl.innerHTML = '<span style="color:' + color + ';font-weight:700;">' + currentPlayerName + '</span>\'s turn';
     return;
   }
 
   if (gameOver) return;
-  const name  = current === 1 ? "Red" : "Yellow";
-  const color = current === 1 ? "#ff2e2e" : "#ffc400";
+  const name  = current === 1 ? "Blue" : "Coral";
+  const color = current === 1 ? "#25bfe4" : "#ff6966";
   statusEl.innerHTML = '<span style="color:' + color + ';font-weight:700;">' + name + '</span>\'s turn';
 }
 
+
+boardEl.addEventListener("keydown", (e) => {
+  if (e.key !== "Enter" && e.key !== " ") return;
+  const cell = e.target.closest(".cell");
+  if (!cell) return;
+  e.preventDefault();
+  if (typeof cell.click === "function") cell.click();
+});
 
 boardEl.addEventListener("click", (e) => {
   if (gameOver) return;
@@ -1349,6 +1556,7 @@ function getBoardSnapshot() {
     winnerOverlayVisible: gameOver,
     rematchState,
     order: players.slice(), // authoritative seat order, so a rejoiner restores the same player 1/2 mapping
+    tokenSets: Object.assign({}, playerTokenSets), // cosmetic choices survive reconnects without entering the move log
     moveIds: Array.from(appliedMoveIds), // dedup watermark: which moves this board already bakes in
     seq: lastAppliedSeq,                 // secondary watermark (when moveId is absent)
     version: Date.now(),
@@ -1393,13 +1601,13 @@ function showWinnerOverlay() {
 
   const winnerId = isMultiplayer ? players[lastWinnerPlayer - 1] : null;
   const winnerName = isMultiplayer
-    ? playerLabelForStatus(winnerId, lastWinnerPlayer === 1 ? "Red" : "Yellow")
-    : (lastWinnerPlayer === 1 ? "Red" : "Yellow");
-  const color = lastWinnerPlayer === 1 ? "#ff4444" : "#ffc400";
+    ? playerLabelForStatus(winnerId, lastWinnerPlayer === 1 ? "Blue" : "Coral")
+    : (lastWinnerPlayer === 1 ? "Blue" : "Coral");
+  const color = lastWinnerPlayer === 1 ? "#167fb4" : "#cf4051";
 
   winnerNameDisplay.textContent = winnerName;
   winnerNameDisplay.style.color = color;
-  winnerEmoji.textContent = lastWinnerPlayer === 1 ? "🔴" : "🟡";
+  winnerEmoji.textContent = "🏆";
   showWinnerBanner();
   syncRematchUi();
 }
@@ -1445,6 +1653,12 @@ function applyBoardSnapshot(snapshot, senderId, trusted) {
     players = snapshot.order.slice();
     if (myId) myPlayer = players.indexOf(myId) + 1;
   }
+  if (snapshot.tokenSets && typeof snapshot.tokenSets === "object") {
+    Object.keys(snapshot.tokenSets).forEach((playerId) => {
+      const tokenSet = snapshot.tokenSets[playerId];
+      if (isTokenSetId(tokenSet)) playerTokenSets[playerId] = tokenSet;
+    });
+  }
   board = snapshot.board.map((row) => row.slice());
   // Adopt the dedup watermarks the snapshot/checkpoint carries. This is THE fix for
   // the host-resume phantom: the checkpoint bakes its moves into `board`, and the
@@ -1468,6 +1682,7 @@ function applyBoardSnapshot(snapshot, senderId, trusted) {
     lastInsertedPos = null;
   }
   hideWinnerBanner();
+  updateTokenSurfaces();
   renderBoard();
   // No checkpoint write here — applying someone else's snapshot must not re-persist
   // our (possibly older) view over theirs. The actor writes on its own move.
@@ -1483,8 +1698,8 @@ function applyBoardSnapshot(snapshot, senderId, trusted) {
     }
     const winnerId = isMultiplayer ? players[lastWinnerPlayer - 1] : null;
     const name = isMultiplayer
-      ? playerLabelForStatus(winnerId, lastWinnerPlayer === 1 ? "Red" : "Yellow")
-      : (lastWinnerPlayer === 1 ? "Red" : "Yellow");
+      ? playerLabelForStatus(winnerId, lastWinnerPlayer === 1 ? "Blue" : "Coral")
+      : (lastWinnerPlayer === 1 ? "Blue" : "Coral");
     updateStatus("🎉 " + name + " wins!");
     showWinnerOverlay();
   } else if (isFull()) {
@@ -1506,6 +1721,11 @@ function animateDrop(col, targetRow, player, onDone) {
   const disk = document.createElement("div");
   disk.className = "drop-disk";
   disk.dataset.player = player;
+  const token = document.createElement("img");
+  token.className = "token-art";
+  token.src = tokenAssetForSlot(player);
+  token.alt = "";
+  disk.appendChild(token);
 
   const left = (cellRect.left - boardRect.left) + cellSize * 0.075;
   disk.style.width  = (cellSize * 0.85) + "px";
@@ -1571,16 +1791,16 @@ function handleMove(col, local = true) {
 
         const winnerId = isMultiplayer ? players[player - 1] : null;
         const name  = isMultiplayer
-          ? playerLabelForStatus(winnerId, player === 1 ? "Red" : "Yellow")
-          : (player === 1 ? "Red" : "Yellow");
-        const color = player === 1 ? "#ff4444" : "#ffc400";
+          ? playerLabelForStatus(winnerId, player === 1 ? "Blue" : "Coral")
+          : (player === 1 ? "Blue" : "Coral");
+        const color = player === 1 ? "#167fb4" : "#cf4051";
 
         updateStatus("🎉 " + name + " wins!");
 
         setTimeout(() => {
           winnerNameDisplay.textContent = name;
           winnerNameDisplay.style.color = color;
-          winnerEmoji.textContent = player === 1 ? "🔴" : "🟡";
+          winnerEmoji.textContent = "🏆";
           showWinnerBanner();
           spawnConfetti();
 
@@ -1685,7 +1905,7 @@ function highlightWinner(r, c, player) {
 }
 
 function spawnConfetti() {
-  const colors = ["#ff2e2e","#ffc400","#3d42ff","#ff2f6e","#00e5ff","#76ff03","#ff6b2e"];
+  const colors = ["#25bfe4","#ff6966","#ffd166","#64c98a","#fff0cf","#7d74df"];
   for (let i = 0; i < 40; i++) {
     const el = document.createElement("div");
     el.className = "confetti-piece";
@@ -1821,3 +2041,11 @@ function minimax(b, depth, alpha, beta, maximizing) {
 // ── Boot ──────────────────────────────────────────────────
 setWinsVisibility(false);
 syncControlVisibility();
+if (!usionSdkAvailable) {
+  // Direct local-file preview: the hosted Usion SDK can be unavailable when
+  // index.html is opened from disk. Keep the complete solo game usable instead
+  // of leaving an empty lacquer cabinet with no board cells.
+  hideWaiting();
+  setPlayerDisplayBot();
+  init();
+}

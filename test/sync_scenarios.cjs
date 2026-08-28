@@ -1,5 +1,5 @@
 const { test, ok, eq, run } = require("../../13/test/lib/tap.cjs");
-const { onlinePair, countDisks } = require("./harness.cjs");
+const { offlineClient, onlinePair, countDisks } = require("./harness.cjs");
 
 function assertConsistent(host, guest, message) {
   const a = host.snap();
@@ -25,6 +25,14 @@ async function winForHost(world, host, guest) {
   await play(world, host, 3);
   await world.advance(700);
 }
+
+test("direct local-file startup renders a complete solo board without the hosted SDK", () => {
+  const local = offlineClient();
+  eq(local.doc.getElementById("board").children.length, 42, "all board openings render");
+  eq(local.read("board.length"), 6, "solo board state initializes");
+  eq(local.doc.getElementById("status").textContent, "Blue's turn", "solo turn is ready");
+  eq(local.errors.length, 0, "offline startup has no runtime errors");
+});
 
 test("normal alternating moves stay identical on both clients", async () => {
   const { world, host, guest } = await onlinePair();

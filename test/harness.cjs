@@ -361,6 +361,50 @@ class Client {
   }
 }
 
+function offlineClient() {
+  const clock = new Clock();
+  const doc = new Document(BODY_HTML);
+  const errors = [];
+  const store = new Map();
+  class VirtualDate extends Date {
+    constructor(...args) { args.length ? super(...args) : super(clock.now); }
+    static now() { return clock.now; }
+  }
+  const sandbox = {
+    document: doc,
+    localStorage: {
+      getItem: (key) => store.has(key) ? store.get(key) : null,
+      setItem: (key, value) => store.set(key, String(value)),
+      removeItem: (key) => store.delete(key),
+    },
+    Date: VirtualDate,
+    performance: { now: () => clock.now },
+    console: {
+      log() {},
+      warn() {},
+      error(...args) { errors.push(new Error(args.join(" "))); },
+    },
+    setTimeout: (fn, ms) => clock.setTimeout(null, fn, ms),
+    setInterval: (fn, ms) => clock.setInterval(null, fn, ms),
+    clearTimeout: (id) => clock.clear(id),
+    clearInterval: (id) => clock.clear(id),
+    requestAnimationFrame: (fn) => clock.setTimeout(null, fn, 16),
+    JSON, Promise, Object, Array, String, Number, Boolean, Set, Map, Error, RegExp, Symbol,
+    isNaN, parseInt, parseFloat,
+  };
+  sandbox.window = sandbox;
+  sandbox.globalThis = sandbox;
+  sandbox.self = sandbox;
+  const ctx = vm.createContext(sandbox);
+  vm.runInContext(SCRIPT, ctx, { filename: "connect_four/script.js" });
+  return {
+    clock,
+    doc,
+    errors,
+    read(expression) { return vm.runInContext("(" + expression + ")", ctx); },
+  };
+}
+
 class World {
   constructor(opts) {
     this.clock = new Clock();
@@ -404,4 +448,4 @@ function countDisks(board) {
   return board.reduce((total, row) => total + row.filter(Boolean).length, 0);
 }
 
-module.exports = { World, Client, onlinePair, countDisks, clone };
+module.exports = { World, Client, offlineClient, onlinePair, countDisks, clone };
