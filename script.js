@@ -101,6 +101,7 @@ const diffSelect       = document.getElementById("difficulty");
 const difficultyControl= document.getElementById("difficultyControl");
 const winnerBanner     = document.getElementById("winnerBanner");
 const winnerNameDisplay= document.getElementById("winnerNameDisplay");
+const winnerVerb       = document.getElementById("winnerVerb");
 const winnerEmoji      = document.getElementById("winnerEmoji");
 const winnerPlayAgain  = document.getElementById("winnerPlayAgain");
 
@@ -116,10 +117,18 @@ const playBotBtn       = document.getElementById("playBotBtn");
 const inviteBtn        = document.getElementById("inviteBtn");
 const player1Avatar    = document.getElementById("player1Avatar");
 const player2Avatar    = document.getElementById("player2Avatar");
+const player1Panel     = document.getElementById("player1Panel");
+const player2Panel     = document.getElementById("player2Panel");
 const player1Name      = document.getElementById("player1Name");
 const player2Name      = document.getElementById("player2Name");
+const player1SeatLabel = document.getElementById("player1SeatLabel");
+const player2SeatLabel = document.getElementById("player2SeatLabel");
 const player1Token     = document.getElementById("player1Token");
 const player2Token     = document.getElementById("player2Token");
+const yourOwnerKey     = document.getElementById("yourOwnerKey");
+const opponentOwnerKey = document.getElementById("opponentOwnerKey");
+const yourLegendToken  = document.getElementById("yourLegendToken");
+const opponentLegendToken = document.getElementById("opponentLegendToken");
 const tokenEditBtn     = document.getElementById("tokenEditBtn");
 const tokenEditPreview1= document.getElementById("tokenEditPreview1");
 const tokenEditPreview2= document.getElementById("tokenEditPreview2");
@@ -154,6 +163,33 @@ function tokenAssetForSlot(slot) {
   return tokenSetById(tokenSetIdForSlot(slot)).sides[slot === 2 ? 1 : 0];
 }
 
+function localPlayerSlot() {
+  return isMultiplayer && myPlayer ? myPlayer : 1;
+}
+
+function ownershipForSlot(slot) {
+  return slot === localPlayerSlot() ? "you" : "opponent";
+}
+
+function updateOwnershipCues() {
+  const mine = localPlayerSlot();
+  const opponent = mine === 1 ? 2 : 1;
+  if (yourLegendToken) yourLegendToken.src = tokenAssetForSlot(mine);
+  if (opponentLegendToken) opponentLegendToken.src = tokenAssetForSlot(opponent);
+  if (yourOwnerKey) yourOwnerKey.dataset.player = mine;
+  if (opponentOwnerKey) opponentOwnerKey.dataset.player = opponent;
+  if (player1Panel) {
+    player1Panel.classList.toggle("is-you", mine === 1);
+    player1Panel.classList.toggle("is-opponent", mine !== 1);
+  }
+  if (player2Panel) {
+    player2Panel.classList.toggle("is-you", mine === 2);
+    player2Panel.classList.toggle("is-opponent", mine !== 2);
+  }
+  if (player1SeatLabel) player1SeatLabel.textContent = mine === 1 ? "Your token · Blue" : "Opponent · Blue";
+  if (player2SeatLabel) player2SeatLabel.textContent = mine === 2 ? "Your token · Coral" : "Opponent · Coral";
+}
+
 function updateTokenSurfaces() {
   const sideOne = tokenAssetForSlot(1);
   const sideTwo = tokenAssetForSlot(2);
@@ -162,6 +198,7 @@ function updateTokenSurfaces() {
   const ownSet = tokenSetById(selectedTokenSetId);
   if (tokenEditPreview1) tokenEditPreview1.src = ownSet.sides[0];
   if (tokenEditPreview2) tokenEditPreview2.src = ownSet.sides[1];
+  updateOwnershipCues();
 }
 
 function refreshTokenPickerSelection() {
@@ -981,11 +1018,7 @@ function finalizeSyncRender() {
       const el = boardEl.children[row * COLS + col];
       if (el) el.classList.add("winner");
     }
-    const winnerId = isMultiplayer ? players[lastWinnerPlayer - 1] : null;
-    const name = isMultiplayer
-      ? playerLabelForStatus(winnerId, lastWinnerPlayer === 1 ? "Blue" : "Coral")
-      : (lastWinnerPlayer === 1 ? "Blue" : "Coral");
-    updateStatus("🎉 " + name + " wins!");
+    updateStatus(winnerStatusText(lastWinnerPlayer));
     showWinnerOverlay();
   } else if (gameOver) {
     updateStatus("Draw!");
@@ -1443,10 +1476,14 @@ function renderBoard() {
       cell.setAttribute("aria-label", "Drop a token in column " + (c + 1));
       cell.tabIndex = 0;
       if (board[r][c]) {
-        cell.dataset.player = board[r][c];
+        const slot = board[r][c];
+        const owner = ownershipForSlot(slot);
+        cell.dataset.player = slot;
+        cell.dataset.owner = owner;
+        cell.setAttribute("aria-label", (owner === "you" ? "Your" : "Opponent") + " token in column " + (c + 1));
         const token = document.createElement("img");
         token.className = "token-art";
-        token.src = tokenAssetForSlot(board[r][c]);
+        token.src = tokenAssetForSlot(slot);
         token.alt = "";
         cell.appendChild(token);
         if (lastInsertedPos && lastInsertedPos.r === r && lastInsertedPos.c === c) {
@@ -1463,8 +1500,23 @@ function playerLabelForStatus(playerId, fallback) {
   return playerNames[playerId] || fallback || "Player";
 }
 
+function roleNameForSlot(slot) {
+  if (slot === localPlayerSlot()) return "You";
+  if (!isMultiplayer) return "Bot";
+  return playerLabelForStatus(players[slot - 1], "Opponent");
+}
+
+function winnerStatusText(slot) {
+  return "🎉 " + roleNameForSlot(slot) + (slot === localPlayerSlot() ? " win!" : " wins!");
+}
+
 function updateStatus(text) {
-  if (text) { statusEl.textContent = text; return; }
+  if (text) {
+    statusEl.removeAttribute("data-player");
+    statusEl.removeAttribute("data-owner");
+    statusEl.textContent = text;
+    return;
+  }
   // While the opponent is gone, the grace countdown owns the status line — don't
   // let a stray resync overwrite the "paused / waiting to rejoin" message.
   if (forfeitTimer && !gameOver) return;
@@ -1472,25 +1524,28 @@ function updateStatus(text) {
   if (isMultiplayer) {
     if (gameOver) {
       if (lastWinnerPlayer) {
-        const winnerId = players[lastWinnerPlayer - 1];
-        updateStatus("🎉 " + playerLabelForStatus(winnerId, "Winner") + " wins!");
+        updateStatus(winnerStatusText(lastWinnerPlayer));
       } else {
         updateStatus("Draw!");
       }
       return;
     }
 
-    const currentPlayerId = players[current - 1];
-    const currentPlayerName = playerLabelForStatus(currentPlayerId, current === 1 ? "Blue" : "Coral");
     const color = current === 1 ? "#25bfe4" : "#ff6966";
-    statusEl.innerHTML = '<span style="color:' + color + ';font-weight:700;">' + currentPlayerName + '</span>\'s turn';
+    const isMine = current === localPlayerSlot();
+    const turnLabel = isMine ? "Your turn" : roleNameForSlot(current) + "'s turn";
+    statusEl.dataset.player = current;
+    statusEl.dataset.owner = isMine ? "you" : "opponent";
+    statusEl.innerHTML = '<span style="color:' + color + ';font-weight:900;">' + turnLabel + '</span>';
     return;
   }
 
   if (gameOver) return;
-  const name  = current === 1 ? "Blue" : "Coral";
   const color = current === 1 ? "#25bfe4" : "#ff6966";
-  statusEl.innerHTML = '<span style="color:' + color + ';font-weight:700;">' + name + '</span>\'s turn';
+  const isMine = current === 1;
+  statusEl.dataset.player = current;
+  statusEl.dataset.owner = isMine ? "you" : "opponent";
+  statusEl.innerHTML = '<span style="color:' + color + ';font-weight:900;">' + (isMine ? "Your turn" : "Bot's turn") + '</span>';
 }
 
 
@@ -1599,13 +1654,11 @@ function syncRematchUi() {
 function showWinnerOverlay() {
   if (!gameOver || !lastWinnerPlayer) return;
 
-  const winnerId = isMultiplayer ? players[lastWinnerPlayer - 1] : null;
-  const winnerName = isMultiplayer
-    ? playerLabelForStatus(winnerId, lastWinnerPlayer === 1 ? "Blue" : "Coral")
-    : (lastWinnerPlayer === 1 ? "Blue" : "Coral");
+  const winnerName = roleNameForSlot(lastWinnerPlayer);
   const color = lastWinnerPlayer === 1 ? "#167fb4" : "#cf4051";
 
   winnerNameDisplay.textContent = winnerName;
+  if (winnerVerb) winnerVerb.textContent = lastWinnerPlayer === localPlayerSlot() ? " win the shelf!" : " wins the shelf!";
   winnerNameDisplay.style.color = color;
   winnerEmoji.textContent = "🏆";
   showWinnerBanner();
@@ -1696,11 +1749,7 @@ function applyBoardSnapshot(snapshot, senderId, trusted) {
         if (el) el.classList.add("winner");
       }
     }
-    const winnerId = isMultiplayer ? players[lastWinnerPlayer - 1] : null;
-    const name = isMultiplayer
-      ? playerLabelForStatus(winnerId, lastWinnerPlayer === 1 ? "Blue" : "Coral")
-      : (lastWinnerPlayer === 1 ? "Blue" : "Coral");
-    updateStatus("🎉 " + name + " wins!");
+    updateStatus(winnerStatusText(lastWinnerPlayer));
     showWinnerOverlay();
   } else if (isFull()) {
     recordOutcome(0);
@@ -1721,6 +1770,7 @@ function animateDrop(col, targetRow, player, onDone) {
   const disk = document.createElement("div");
   disk.className = "drop-disk";
   disk.dataset.player = player;
+  disk.dataset.owner = ownershipForSlot(player);
   const token = document.createElement("img");
   token.className = "token-art";
   token.src = tokenAssetForSlot(player);
@@ -1789,16 +1839,14 @@ function handleMove(col, local = true) {
       if (isWin) {
         highlightWinner(r, col, player);
 
-        const winnerId = isMultiplayer ? players[player - 1] : null;
-        const name  = isMultiplayer
-          ? playerLabelForStatus(winnerId, player === 1 ? "Blue" : "Coral")
-          : (player === 1 ? "Blue" : "Coral");
+        const name = roleNameForSlot(player);
         const color = player === 1 ? "#167fb4" : "#cf4051";
 
-        updateStatus("🎉 " + name + " wins!");
+        updateStatus(winnerStatusText(player));
 
         setTimeout(() => {
           winnerNameDisplay.textContent = name;
+          if (winnerVerb) winnerVerb.textContent = player === localPlayerSlot() ? " win the shelf!" : " wins the shelf!";
           winnerNameDisplay.style.color = color;
           winnerEmoji.textContent = "🏆";
           showWinnerBanner();

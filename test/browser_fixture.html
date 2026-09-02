@@ -20,22 +20,26 @@
     <section class="topbar" aria-label="Players">
       <article class="player left" id="player1Panel">
         <div class="player-portrait"><img id="player1Avatar" src="../assets/tokens/whisker-rivals-1.png" alt="Player one avatar"><span class="presence-dot"></span></div>
-        <div class="player-copy"><span class="seat-label">Blue side</span><div class="name" id="player1Name">You</div><div class="wins" id="player1Wins">Wins <span>0</span></div></div>
+        <div class="player-copy"><span class="seat-label" id="player1SeatLabel">Your token · Blue</span><div class="name" id="player1Name">You</div><div class="wins" id="player1Wins">Wins <span>0</span></div></div>
         <img class="player-token" id="player1Token" src="../assets/tokens/whisker-rivals-1.png" alt="Player one token">
       </article>
       <div class="versus-mark" aria-hidden="true"><span>VS</span></div>
       <article class="player right" id="player2Panel">
         <img class="player-token" id="player2Token" src="../assets/tokens/whisker-rivals-2.png" alt="Player two token">
-        <div class="player-copy player-copy-right"><span class="seat-label">Coral side</span><div class="name" id="player2Name">Bot</div><div class="wins" id="player2Wins">Wins <span>0</span></div></div>
+        <div class="player-copy player-copy-right"><span class="seat-label" id="player2SeatLabel">Opponent · Coral</span><div class="name" id="player2Name">Bot</div><div class="wins" id="player2Wins">Wins <span>0</span></div></div>
         <div class="player-portrait"><img id="player2Avatar" src="../assets/tokens/whisker-rivals-2.png" alt="Player two avatar"><span class="presence-dot"></span></div>
       </article>
     </section>
     <div class="turn-indicator" id="status" role="status">Your turn</div>
-    <section class="board-stage" aria-label="Four in a row game board">
+    <div class="ownership-legend" id="ownershipLegend" aria-label="Token ownership guide">
+      <div class="owner-key owner-key-you" id="yourOwnerKey" data-player="1"><span class="owner-token-frame" aria-hidden="true"><img id="yourLegendToken" src="../assets/tokens/whisker-rivals-1.png" alt=""></span><span class="owner-key-copy"><strong>Your pieces</strong><small>Solid rim + dot</small></span></div>
+      <div class="owner-key owner-key-opponent" id="opponentOwnerKey" data-player="2"><span class="owner-token-frame" aria-hidden="true"><img id="opponentLegendToken" src="../assets/tokens/whisker-rivals-2.png" alt=""></span><span class="owner-key-copy"><strong>Opponent</strong><small>Dashed rim + diamond</small></span></div>
+    </div>
+    <section class="board-stage" aria-label="Four in a row game board" aria-describedby="ownershipLegend">
       <div class="board-lip" aria-hidden="true"><span></span><span></span><span></span><span></span><span></span><span></span><span></span></div>
       <div id="board"></div><div class="board-foot" aria-hidden="true"><span></span><span></span></div>
     </section>
-    <div id="winnerBanner" class="winner-banner" hidden><span class="winner-banner-emoji" id="winnerEmoji">🏆</span><span class="winner-banner-text"><strong id="winnerNameDisplay">Player</strong> wins the shelf!</span><div class="winner-banner-actions"><button class="winner-btn" id="winnerPlayAgain">Rematch</button></div></div>
+    <div id="winnerBanner" class="winner-banner" hidden><span class="winner-banner-emoji" id="winnerEmoji">🏆</span><span class="winner-banner-text"><strong id="winnerNameDisplay">Player</strong><span id="winnerVerb"> wins the shelf!</span></span><div class="winner-banner-actions"><button class="winner-btn" id="winnerPlayAgain">Rematch</button></div></div>
     <div class="controls"><label class="difficulty-control" id="difficultyControl"><span>Bot level</span><select id="difficulty"><option value="1">Easy</option><option value="3">Medium</option><option value="5">Hard</option></select></label><p class="board-tip">Tap any open column to drop your token.</p></div>
   </main>
   <button id="chatToggle" class="chat-toggle" type="button" aria-label="Түргэн чат" aria-expanded="false">💬</button>

@@ -30,7 +30,11 @@ test("direct local-file startup renders a complete solo board without the hosted
   const local = offlineClient();
   eq(local.doc.getElementById("board").children.length, 42, "all board openings render");
   eq(local.read("board.length"), 6, "solo board state initializes");
-  eq(local.doc.getElementById("status").textContent, "Blue's turn", "solo turn is ready");
+  eq(local.doc.getElementById("status").textContent, "Your turn", "solo turn is clearly owned");
+  local.run("board[5][0] = 1; board[5][1] = 2; renderBoard();");
+  eq(local.doc.getElementById("board").children[35].dataset.owner, "you", "local token is marked as yours");
+  eq(local.doc.getElementById("board").children[36].dataset.owner, "opponent", "bot token is marked as opponent");
+  ok(local.doc.getElementById("player1Panel").classList.contains("is-you"), "your player card is emphasized");
   eq(local.errors.length, 0, "offline startup has no runtime errors");
 });
 

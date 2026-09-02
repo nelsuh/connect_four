@@ -402,6 +402,7 @@ function offlineClient() {
     doc,
     errors,
     read(expression) { return vm.runInContext("(" + expression + ")", ctx); },
+    run(code) { return vm.runInContext(code, ctx); },
   };
 }
 

@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#13233f">
 <title>Pocket Four</title>
 <link rel="stylesheet" href="https://usions.com/usion-design-system.css">
-<link rel="stylesheet" href="style.css?v=20">
+<link rel="stylesheet" href="style.css?v=21">
 </head>
 
 <body>
@@ -36,7 +36,7 @@
         <span class="presence-dot" aria-hidden="true"></span>
       </div>
       <div class="player-copy">
-        <span class="seat-label">Blue side</span>
+        <span class="seat-label" id="player1SeatLabel">Your token · Blue</span>
         <div class="name" id="player1Name">You</div>
         <div class="wins" id="player1Wins">Wins <span>0</span></div>
       </div>
@@ -48,7 +48,7 @@
     <article class="player right" id="player2Panel">
       <img class="player-token" id="player2Token" src="assets/tokens/whisker-rivals-2.png" alt="Player two token">
       <div class="player-copy player-copy-right">
-        <span class="seat-label">Coral side</span>
+        <span class="seat-label" id="player2SeatLabel">Opponent · Coral</span>
         <div class="name" id="player2Name">Bot</div>
         <div class="wins" id="player2Wins">Wins <span>0</span></div>
       </div>
@@ -61,7 +61,22 @@
 
   <div class="turn-indicator" id="status" role="status" aria-live="polite">Your turn</div>
 
-  <section class="board-stage" aria-label="Four in a row game board">
+  <div class="ownership-legend" id="ownershipLegend" aria-label="Token ownership guide">
+    <div class="owner-key owner-key-you" id="yourOwnerKey" data-player="1">
+      <span class="owner-token-frame" aria-hidden="true">
+        <img id="yourLegendToken" src="assets/tokens/whisker-rivals-1.png" alt="">
+      </span>
+      <span class="owner-key-copy"><strong>Your pieces</strong><small>Solid rim + dot</small></span>
+    </div>
+    <div class="owner-key owner-key-opponent" id="opponentOwnerKey" data-player="2">
+      <span class="owner-token-frame" aria-hidden="true">
+        <img id="opponentLegendToken" src="assets/tokens/whisker-rivals-2.png" alt="">
+      </span>
+      <span class="owner-key-copy"><strong>Opponent</strong><small>Dashed rim + diamond</small></span>
+    </div>
+  </div>
+
+  <section class="board-stage" aria-label="Four in a row game board" aria-describedby="ownershipLegend">
     <div class="board-lip" aria-hidden="true">
       <span></span><span></span><span></span><span></span><span></span><span></span><span></span>
     </div>
@@ -71,7 +86,7 @@
 
   <div id="winnerBanner" class="winner-banner" hidden>
     <span class="winner-banner-emoji" id="winnerEmoji">🏆</span>
-    <span class="winner-banner-text"><strong id="winnerNameDisplay">Player</strong> wins the shelf!</span>
+    <span class="winner-banner-text"><strong id="winnerNameDisplay">Player</strong><span id="winnerVerb"> wins the shelf!</span></span>
     <div class="winner-banner-actions">
       <button class="winner-btn" id="winnerPlayAgain" type="button">Rematch</button>
     </div>
@@ -141,7 +156,7 @@
 </div>
 
 <script src="https://usions.com/usion-sdk.js"></script>
-<script src="script.js?v=23"></script>
+<script src="script.js?v=24"></script>
 
 </body>
 </html>
