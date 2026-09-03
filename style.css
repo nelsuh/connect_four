@@ -7,6 +7,11 @@
   --cream:#fff0cf;
   --blue:#25bfe4;
   --blue-deep:#167fb4;
+  --board-light:#35b9ee;
+  --board-mid:#087bc5;
+  --board-deep:#07509a;
+  --board-edge:#063d7a;
+  --board-shadow:#04285a;
   --coral:#ff6966;
   --coral-deep:#cf4051;
   --gold:#ffd166;
@@ -17,6 +22,18 @@
 }
 
 *{box-sizing:border-box}
+
+.sr-only{
+  position:absolute!important;
+  width:1px!important;
+  height:1px!important;
+  padding:0!important;
+  margin:-1px!important;
+  overflow:hidden!important;
+  clip:rect(0,0,0,0)!important;
+  white-space:nowrap!important;
+  border:0!important;
+}
 
 html{min-height:100%;background:var(--night-deep)}
 
@@ -77,9 +94,9 @@ button:focus-visible,select:focus-visible,input:focus-visible,.cell:focus-visibl
   width:min(100%,500px);
   display:flex;
   align-items:center;
-  justify-content:space-between;
+  justify-content:flex-end;
   gap:16px;
-  margin-bottom:18px;
+  margin-bottom:12px;
 }
 
 .game-kicker,.prep-kicker{
@@ -379,10 +396,10 @@ button:focus-visible,select:focus-visible,input:focus-visible,.cell:focus-visibl
   grid-template-columns:repeat(7,1fr);
   gap:var(--cell-gap);
   align-items:center;
-  border:2px solid #a92e43;
+  border:2px solid var(--board-edge);
   border-bottom:0;
   border-radius:18px 18px 3px 3px;
-  background:linear-gradient(#ff8680,#e84d5e);
+  background:linear-gradient(var(--board-light),var(--board-mid));
   box-shadow:inset 0 4px rgba(255,255,255,.18);
 }
 
@@ -402,15 +419,15 @@ button:focus-visible,select:focus-visible,input:focus-visible,.cell:focus-visibl
   grid-template-rows:repeat(6,var(--cell-size));
   gap:var(--cell-gap);
   padding:clamp(10px,3vw,16px);
-  border:3px solid #a52f44;
+  border:3px solid var(--board-edge);
   border-radius:20px 20px 24px 24px;
   background:
     linear-gradient(100deg,transparent 12%,rgba(255,255,255,.08) 12.5%,transparent 13%),
-    linear-gradient(180deg,#ff7771 0%,#e64f5c 48%,#c93d50 100%);
+    linear-gradient(180deg,var(--board-light) 0%,var(--board-mid) 48%,var(--board-deep) 100%);
   box-shadow:
     inset 0 7px rgba(255,255,255,.17),
-    inset 0 -10px rgba(111,22,53,.22),
-    0 8px 0 #7f253c;
+    inset 0 -10px rgba(1,28,77,.3),
+    0 8px 0 var(--board-edge);
 }
 
 .board-foot{
@@ -419,7 +436,7 @@ button:focus-visible,select:focus-visible,input:focus-visible,.cell:focus-visibl
   height:22px;
   margin:4px 24px 0;
   border-radius:0 0 18px 18px;
-  background:#8c2a40;
+  background:var(--board-edge);
   box-shadow:inset 0 -4px rgba(0,0,0,.15);
 }
 
@@ -429,7 +446,7 @@ button:focus-visible,select:focus-visible,input:focus-visible,.cell:focus-visibl
   width:42px;
   height:14px;
   border-radius:0 0 10px 10px;
-  background:#6e2036;
+  background:var(--board-shadow);
 }
 .board-foot span:first-child{left:20px}
 .board-foot span:last-child{right:20px}

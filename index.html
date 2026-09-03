@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#13233f">
 <title>Pocket Four</title>
 <link rel="stylesheet" href="https://usions.com/usion-design-system.css">
-<link rel="stylesheet" href="style.css?v=21">
+<link rel="stylesheet" href="style.css?v=22">
 </head>
 
 <body>
@@ -16,10 +16,6 @@
 
 <main class="phone game-shell">
   <header class="game-heading">
-    <div>
-      <p class="game-kicker">A tiny tabletop duel</p>
-      <h1>Pocket Four</h1>
-    </div>
     <button id="tokenEditBtn" class="token-edit-btn" type="button" aria-label="Choose a token pair">
       <span class="token-edit-stack" aria-hidden="true">
         <img id="tokenEditPreview1" src="assets/tokens/whisker-rivals-1.png" alt="">
@@ -59,7 +55,7 @@
     </article>
   </section>
 
-  <div class="turn-indicator" id="status" role="status" aria-live="polite">Your turn</div>
+  <div class="sr-only" id="status" role="status" aria-live="polite">Your turn</div>
 
   <div class="ownership-legend" id="ownershipLegend" aria-label="Token ownership guide">
     <div class="owner-key owner-key-you" id="yourOwnerKey" data-player="1">
@@ -101,7 +97,6 @@
         <option value="5">Hard</option>
       </select>
     </label>
-    <p class="board-tip">Tap any open column to drop your token.</p>
   </div>
 </main>
 

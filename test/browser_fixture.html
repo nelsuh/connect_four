@@ -12,7 +12,6 @@
   <div class="room-glow room-glow-two" aria-hidden="true"></div>
   <main class="phone game-shell">
     <header class="game-heading">
-      <div><p class="game-kicker">A tiny tabletop duel</p><h1>Pocket Four</h1></div>
       <button id="tokenEditBtn" class="token-edit-btn" type="button" aria-label="Choose a token pair">
         <span class="token-edit-stack" aria-hidden="true"><img id="tokenEditPreview1" src="../assets/tokens/whisker-rivals-1.png" alt=""><img id="tokenEditPreview2" src="../assets/tokens/whisker-rivals-2.png" alt=""></span><span>Tokens</span>
       </button>
@@ -30,7 +29,7 @@
         <div class="player-portrait"><img id="player2Avatar" src="../assets/tokens/whisker-rivals-2.png" alt="Player two avatar"><span class="presence-dot"></span></div>
       </article>
     </section>
-    <div class="turn-indicator" id="status" role="status">Your turn</div>
+    <div class="sr-only" id="status" role="status">Your turn</div>
     <div class="ownership-legend" id="ownershipLegend" aria-label="Token ownership guide">
       <div class="owner-key owner-key-you" id="yourOwnerKey" data-player="1"><span class="owner-token-frame" aria-hidden="true"><img id="yourLegendToken" src="../assets/tokens/whisker-rivals-1.png" alt=""></span><span class="owner-key-copy"><strong>Your pieces</strong><small>Solid rim + dot</small></span></div>
       <div class="owner-key owner-key-opponent" id="opponentOwnerKey" data-player="2"><span class="owner-token-frame" aria-hidden="true"><img id="opponentLegendToken" src="../assets/tokens/whisker-rivals-2.png" alt=""></span><span class="owner-key-copy"><strong>Opponent</strong><small>Dashed rim + diamond</small></span></div>
@@ -40,7 +39,7 @@
       <div id="board"></div><div class="board-foot" aria-hidden="true"><span></span><span></span></div>
     </section>
     <div id="winnerBanner" class="winner-banner" hidden><span class="winner-banner-emoji" id="winnerEmoji">🏆</span><span class="winner-banner-text"><strong id="winnerNameDisplay">Player</strong><span id="winnerVerb"> wins the shelf!</span></span><div class="winner-banner-actions"><button class="winner-btn" id="winnerPlayAgain">Rematch</button></div></div>
-    <div class="controls"><label class="difficulty-control" id="difficultyControl"><span>Bot level</span><select id="difficulty"><option value="1">Easy</option><option value="3">Medium</option><option value="5">Hard</option></select></label><p class="board-tip">Tap any open column to drop your token.</p></div>
+    <div class="controls"><label class="difficulty-control" id="difficultyControl"><span>Bot level</span><select id="difficulty"><option value="1">Easy</option><option value="3">Medium</option><option value="5">Hard</option></select></label></div>
   </main>
   <button id="chatToggle" class="chat-toggle" type="button" aria-label="Түргэн чат" aria-expanded="false">💬</button>
   <div id="chatPicker" class="chat-picker" aria-hidden="true"><div class="chat-picker-title">Түргэн чат</div><div class="chat-phrases" id="chatPhrases"></div><form id="customChatForm" class="custom-chat-form" hidden><button id="customChatBack" class="custom-chat-back" type="button">←</button><input id="customChatInput" class="custom-chat-input" type="text" maxlength="80" placeholder="Type a message…"><button class="custom-chat-send" type="submit">Send</button></form></div>
