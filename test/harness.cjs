@@ -403,6 +403,7 @@ function offlineClient() {
     errors,
     read(expression) { return vm.runInContext("(" + expression + ")", ctx); },
     run(code) { return vm.runInContext(code, ctx); },
+    async advance(ms) { await clock.advance(ms, flush); },
   };
 }
 

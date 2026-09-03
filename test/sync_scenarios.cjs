@@ -38,6 +38,57 @@ test("direct local-file startup renders a complete solo board without the hosted
   eq(local.errors.length, 0, "offline startup has no runtime errors");
 });
 
+test("a full board without four in a row shows TIE and restarts the game", async () => {
+  const local = offlineClient();
+  local.run(`
+    board = [
+      [1,1,1,0,2,2,1],
+      [2,2,2,1,1,1,2],
+      [2,1,2,2,2,1,1],
+      [1,2,2,2,1,1,2],
+      [1,2,1,1,1,2,1],
+      [1,2,2,2,1,1,2]
+    ];
+    current = 2;
+    renderBoard();
+    handleMove(3, false);
+  `);
+  await local.advance(500);
+
+  eq(local.read("gameOver"), true, "tie ends the match");
+  eq(local.read("lastWinnerPlayer"), 0, "tie has no winner");
+  eq(local.doc.getElementById("winnerNameDisplay").textContent, "TIE", "tie result is visible");
+  eq(local.doc.getElementById("winnerPlayAgain").textContent, "Restart Game", "restart action is offered");
+  ok(!local.doc.getElementById("winnerBanner").hidden, "tie banner opens");
+
+  local.doc.getElementById("winnerPlayAgain").onclick();
+  eq(countDisks(local.read("board")), 0, "restart clears the board");
+  ok(local.doc.getElementById("winnerBanner").hidden, "restart closes the tie banner");
+});
+
+test("a multiplayer tie offers one synchronized game restart", async () => {
+  const { world, host, guest } = await onlinePair();
+  const tieColumns = [0,1,0,2,2,3,0,6,6,6,5,2,4,0,4,5,3,3,4,2,5,2,2,4,4,1,5,0,0,1,5,4,1,1,1,3,6,5,3,6,6,3];
+  for (let move = 0; move < tieColumns.length; move++) {
+    await play(world, move % 2 === 0 ? host : guest, tieColumns[move]);
+  }
+  await world.advance(500);
+
+  assertConsistent(host, guest, "tie");
+  ok(host.snap().gameOver && !host.snap().winner, "host records a tie");
+  ok(host.snap().winnerVisible && guest.snap().winnerVisible, "both players see the tie banner");
+  eq(host.snap().rematchLabel, "Restart Game");
+  eq(guest.snap().rematchLabel, "Restart Game");
+
+  host.clickRematch();
+  await world.advance(300);
+  eq(guest.snap().rematchLabel, "Restart Game", "opponent can accept the restart");
+  guest.clickRematch();
+  await world.advance(500);
+  assertConsistent(host, guest, "post-tie restart");
+  eq(countDisks(host.snap().board), 0, "restart clears both boards");
+});
+
 test("normal alternating moves stay identical on both clients", async () => {
   const { world, host, guest } = await onlinePair();
   eq(host.snap().myPlayer, 1);

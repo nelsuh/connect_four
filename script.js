@@ -110,7 +110,10 @@ function showWinnerBanner() {
 }
 
 function hideWinnerBanner() {
-  if (winnerBanner) winnerBanner.hidden = true;
+  if (winnerBanner) {
+    winnerBanner.hidden = true;
+    winnerBanner.classList.remove("tie-result");
+  }
 }
 const waitingOverlay   = document.getElementById("waitingOverlay");
 const playBotBtn       = document.getElementById("playBotBtn");
@@ -1021,7 +1024,8 @@ function finalizeSyncRender() {
     updateStatus(winnerStatusText(lastWinnerPlayer));
     showWinnerOverlay();
   } else if (gameOver) {
-    updateStatus("Draw!");
+    updateStatus("TIE");
+    showTieOverlay();
   } else {
     updateStatus();
   }
@@ -1526,7 +1530,7 @@ function updateStatus(text) {
       if (lastWinnerPlayer) {
         updateStatus(winnerStatusText(lastWinnerPlayer));
       } else {
-        updateStatus("Draw!");
+        updateStatus("TIE");
       }
       return;
     }
@@ -1632,21 +1636,22 @@ function broadcastRematchState() {
 
 function syncRematchUi() {
   if (!isMultiplayer || !gameOver) return;
+  const isTie = !lastWinnerPlayer;
 
   if (rematchState === "requested") {
     if (rematchRequested) {
-      winnerPlayAgain.textContent = "Waiting for rematch...";
+      winnerPlayAgain.textContent = isTie ? "Waiting for restart..." : "Waiting for rematch...";
       winnerPlayAgain.disabled = true;
       winnerPlayAgain.onclick = requestRematch;
     } else {
-      winnerPlayAgain.textContent = "Accept Rematch";
+      winnerPlayAgain.textContent = isTie ? "Restart Game" : "Accept Rematch";
       winnerPlayAgain.disabled = false;
       winnerPlayAgain.onclick = acceptRematch;
     }
     return;
   }
 
-  winnerPlayAgain.textContent = "Rematch";
+  winnerPlayAgain.textContent = isTie ? "Restart Game" : "Rematch";
   winnerPlayAgain.disabled = false;
   winnerPlayAgain.onclick = requestRematch;
 }
@@ -1657,12 +1662,34 @@ function showWinnerOverlay() {
   const winnerName = roleNameForSlot(lastWinnerPlayer);
   const color = lastWinnerPlayer === 1 ? "#167fb4" : "#cf4051";
 
+  winnerBanner.classList.remove("tie-result");
   winnerNameDisplay.textContent = winnerName;
   if (winnerVerb) winnerVerb.textContent = lastWinnerPlayer === localPlayerSlot() ? " win the shelf!" : " wins the shelf!";
   winnerNameDisplay.style.color = color;
   winnerEmoji.textContent = "🏆";
   showWinnerBanner();
   syncRematchUi();
+}
+
+function showTieOverlay() {
+  if (!gameOver || lastWinnerPlayer) return;
+  winnerBanner.classList.add("tie-result");
+  winnerNameDisplay.textContent = "TIE";
+  winnerNameDisplay.style.color = "#b87908";
+  if (winnerVerb) winnerVerb.textContent = "";
+  winnerEmoji.textContent = "🤝";
+  showWinnerBanner();
+
+  if (isMultiplayer) {
+    syncRematchUi();
+  } else {
+    winnerPlayAgain.textContent = "Restart Game";
+    winnerPlayAgain.disabled = false;
+    winnerPlayAgain.onclick = () => {
+      hideWinnerBanner();
+      init();
+    };
+  }
 }
 
 function applyRematchState(payload) {
@@ -1753,7 +1780,8 @@ function applyBoardSnapshot(snapshot, senderId, trusted) {
     showWinnerOverlay();
   } else if (isFull()) {
     recordOutcome(0);
-    updateStatus("Draw!");
+    updateStatus("TIE");
+    showTieOverlay();
   } else {
     updateStatus();
   }
@@ -1866,7 +1894,8 @@ function handleMove(col, local = true) {
         }, 600);
 
       } else if (isDraw) {
-        updateStatus("Draw!");
+        updateStatus("TIE");
+        setTimeout(showTieOverlay, 320);
       }
     });
 
