@@ -1,29 +1,289 @@
 const ROWS = 6, COLS = 7;
-const QUICK_CHAT_PHRASES = [
-  "юм авцаан",
-  "чи болчихжээ",
-  "би болчихжээ",
-  "хурдлаад өгөөрэй",
-  "муу юм бэ",
-  "амтагдахгүй юм байна дөө",
-  "EASY!",
-  "GG!",
-];
+
+// ── i18n ─────────────────────────────────────────────────
+// Every user-facing string lives here, chosen from the platform language
+// (Usion.getLanguage() / config.language) — never hardcode UI text to one
+// locale. Values may be a string or a function of runtime args. Keep both
+// locales in sync.
+const STR = {
+  en: {
+    appName: "Pocket Four",
+    // topbar / seats
+    tokensLabel: "Tokens",
+    chooseTokenPairAria: "Choose a token pair",
+    playersAria: "Players",
+    you: "You",
+    bot: "Bot",
+    opponent: "Opponent",
+    player: "Player",
+    winsLabel: "Wins",
+    seatYours: (color) => "Your token · " + color,
+    seatOpponent: (color) => "Opponent · " + color,
+    colorBlue: "Blue",
+    colorCoral: "Coral",
+    // ownership legend
+    legendAria: "Token ownership guide",
+    yourPieces: "Your pieces",
+    yourPiecesHint: "Solid rim + dot",
+    opponentHint: "Dashed rim + diamond",
+    boardAria: "Four in a row game board",
+    // token picker
+    blueSide: "Blue side",
+    coralSide: "Coral side",
+    bluePlusCoral: "Blue + Coral",
+    prepKicker: "Match preparation",
+    pickWhileWaiting: "Pick a pair while we wait",
+    chooseTokenPair: "Choose your token pair",
+    prepSubReady: "Your opponent is here. Choose a set, then start the match.",
+    prepSubDefault: "Choose one complete pair: Blue plays the left token and Coral the right.",
+    prepSubSeat: "Pick a set now. Your seat decides which side you play.",
+    startWithPair: "Start with this pair",
+    useThisPair: "Use this pair",
+    pairSaved: "Pair saved ✓",
+    selectedLabel: "Selected",
+    closePicker: "Close token picker",
+    tokenPairsAria: "Token pairs",
+    // waiting overlay
+    waitingForOpponent: "Waiting for opponent…",
+    waitingNote: "You can keep browsing while the room fills.",
+    inviteFriend: "Invite a friend",
+    playTheBot: "Play the bot",
+    // bot level
+    botLevel: "Bot level",
+    levelEasy: "Easy", levelMedium: "Medium", levelHard: "Hard",
+    // chat
+    quickChat: "Quick chat",
+    customMessage: "Custom message",
+    customChatToggle: "Custom message",
+    backToQuickChat: "Back to quick chat",
+    typeMessage: "Type a message…",
+    send: "Send",
+    quickChatPhrases: [
+      "nice one",
+      "you got lucky",
+      "got you!",
+      "hurry up",
+      "oh no",
+      "not tasty at all",
+      "EASY!",
+      "GG!",
+    ],
+    // board / status
+    dropInColumn: (n) => "Drop a token in column " + n,
+    tokenInColumn: (owner, n) => (owner === "you" ? "Your" : "Opponent") + " token in column " + n,
+    yourTurn: "Your turn",
+    botsTurn: "Bot's turn",
+    othersTurn: (name) => name + "'s turn",
+    tie: "TIE",
+    winStatus: (name, mine) => "🎉 " + name + (mine ? " win!" : " wins!"),
+    winsTheShelf: " wins the shelf!",
+    winTheShelf: " win the shelf!",
+    // connection / forfeit
+    connectionLost: "Connection lost…",
+    oppLeftRejoin: (s) => "Opponent left — waiting to rejoin… (" + s + "s)",
+    oppLeftGame: "Opponent left the game",
+    youWinOppLeft: "🎉 You win! (opponent left)",
+    // rematch
+    rematch: "Rematch",
+    restartGame: "Restart Game",
+    acceptRematch: "Accept Rematch",
+    waitingForRematch: "Waiting for rematch...",
+    waitingForRestart: "Waiting for restart...",
+    playAgain: "Play Again",
+    // token set names
+    "set_pup-parade": "Pup Parade",
+    "set_bamboo-buddies": "Bamboo Buddies",
+    "set_fox-and-frost": "Fox & Frost",
+    "set_bunny-hop": "Bunny Hop",
+    "set_pond-pals": "Pond Pals",
+    "set_bubble-axolotls": "Bubble Axolotls",
+    "set_forest-bandits": "Forest Bandits",
+    "set_polar-pals": "Polar Pals",
+    "set_honey-and-moon": "Honey & Moon",
+    "set_whisker-rivals": "Whisker Rivals",
+  },
+  mn: {
+    appName: "Дөрвөн эгнээ",
+    tokensLabel: "Хүүхэлдэй",
+    chooseTokenPairAria: "Хүүхэлдэйн хосоо сонго",
+    playersAria: "Тоглогчид",
+    you: "Та",
+    bot: "Бот",
+    opponent: "Өрсөлдөгч",
+    player: "Тоглогч",
+    winsLabel: "Ялалт",
+    seatYours: (color) => "Таны хүүхэлдэй · " + color,
+    seatOpponent: (color) => "Өрсөлдөгч · " + color,
+    colorBlue: "Цэнхэр",
+    colorCoral: "Шүрэн",
+    legendAria: "Хэний хүүхэлдэй вэ гэдгийн заавар",
+    yourPieces: "Таных",
+    yourPiecesHint: "Бүтэн хүрээ + цэг",
+    opponentHint: "Тасархай хүрээ + ромб",
+    boardAria: "Дөрвөн эгнээ тоглоомын самбар",
+    blueSide: "Цэнхэр тал",
+    coralSide: "Шүрэн тал",
+    bluePlusCoral: "Цэнхэр + Шүрэн",
+    prepKicker: "Тулаанд бэлтгэх",
+    pickWhileWaiting: "Хүлээж байхдаа хосоо сонго",
+    chooseTokenPair: "Хүүхэлдэйн хосоо сонго",
+    prepSubReady: "Өрсөлдөгч чинь ирлээ. Багцаа сонгоод тулаанаа эхлүүл.",
+    prepSubDefault: "Бүтэн нэг хос сонго: Цэнхэр зүүн хүүхэлдэйгээр, Шүрэн баруунаар тоглоно.",
+    prepSubSeat: "Одоо багцаа сонго. Аль талд тоглох нь суудлаас чинь шалтгаална.",
+    startWithPair: "Энэ хосоор эхлэх",
+    useThisPair: "Энэ хосыг сонгох",
+    pairSaved: "Хос хадгалагдлаа ✓",
+    selectedLabel: "Сонгосон",
+    closePicker: "Хүүхэлдэйн сонголтыг хаах",
+    tokenPairsAria: "Хүүхэлдэйн хосууд",
+    waitingForOpponent: "Өрсөлдөгчөө хүлээж байна…",
+    waitingNote: "Өрөө дүүртэл чөлөөтэй үзэж байж болно.",
+    inviteFriend: "Найзаа урих",
+    playTheBot: "Боттой тоглох",
+    botLevel: "Ботын түвшин",
+    levelEasy: "Амархан", levelMedium: "Дунд", levelHard: "Хэцүү",
+    quickChat: "Түргэн чат",
+    customMessage: "Өөрийн мессеж",
+    customChatToggle: "Өөрийн мессеж",
+    backToQuickChat: "Түргэн чат руу буцах",
+    typeMessage: "Мессежээ бичнэ үү…",
+    send: "Илгээх",
+    quickChatPhrases: [
+      "юм авцаан",
+      "чи болчихжээ",
+      "би болчихжээ",
+      "хурдлаад өгөөрэй",
+      "муу юм бэ",
+      "амтагдахгүй юм байна дөө",
+      "EASY!",
+      "GG!",
+    ],
+    dropInColumn: (n) => n + "-р баганад хүүхэлдэй хийх",
+    tokenInColumn: (owner, n) => (owner === "you" ? "Таны" : "Өрсөлдөгчийн") + " хүүхэлдэй " + n + "-р баганад",
+    yourTurn: "Таны ээлж",
+    botsTurn: "Ботын ээлж",
+    othersTurn: (name) => name + "-ийн ээлж",
+    tie: "ТЭНЦЛЭЭ",
+    winStatus: (name, mine) => "🎉 " + name + (mine ? " яллаа!" : " яллаа!"),
+    winsTheShelf: " тавцанг эзэллээ!",
+    winTheShelf: " тавцанг эзэллээ!",
+    connectionLost: "Холболт тасарлаа…",
+    oppLeftRejoin: (s) => "Өрсөлдөгч гарлаа — эргэж ортол хүлээж байна… (" + s + "с)",
+    oppLeftGame: "Өрсөлдөгч тоглоомоос гарлаа",
+    youWinOppLeft: "🎉 Та яллаа! (өрсөлдөгч гарлаа)",
+    rematch: "Дахин тулах",
+    restartGame: "Дахин эхлүүлэх",
+    acceptRematch: "Дахин тулахыг зөвшөөрөх",
+    waitingForRematch: "Дахин тулахыг хүлээж байна...",
+    waitingForRestart: "Дахин эхлүүлэхийг хүлээж байна...",
+    playAgain: "Дахин тоглох",
+    "set_whisker-rivals": "Сахалт өрсөлдөгчид",
+    "set_pup-parade": "Гөлөгний жагсаал",
+    "set_bamboo-buddies": "Хулсан нөхөд",
+    "set_fox-and-frost": "Үнэг ба Хяруу",
+    "set_bunny-hop": "Туулайн үсрэлт",
+    "set_pond-pals": "Цөөрмийн нөхөд",
+    "set_bubble-axolotls": "Бөмбөлөгт аксолотл",
+    "set_forest-bandits": "Ойн дээрэмчид",
+    "set_polar-pals": "Туйлын нөхөд",
+    "set_honey-and-moon": "Зөгийн бал ба Сар",
+  },
+};
+let LANG = "en";
+function t(key) {
+  let v = STR[LANG] ? STR[LANG][key] : undefined;
+  if (v === undefined) v = STR.en[key];
+  if (typeof v === "function") return v.apply(null, Array.prototype.slice.call(arguments, 1));
+  return v !== undefined ? v : key;
+}
+// Platform language first (config.language, then Usion.getLanguage()); the
+// browser hint is only a fallback before the host has booted.
+function detectLang(cfgLang) {
+  let src = cfgLang;
+  if (!src) {
+    try { src = window.Usion && window.Usion.getLanguage && window.Usion.getLanguage(); } catch (_) {}
+  }
+  if (!src) src = (navigator.languages && navigator.languages[0]) || navigator.language || "en";
+  return String(src).toLowerCase().indexOf("mn") === 0 ? "mn" : "en";
+}
+function tokenSetName(set) { return set ? t("set_" + set.id) : ""; }
+// Set the active locale and fill every static (index.html) string. Safe to call
+// again once the platform language arrives after the first paint.
+function applyLang(lang) {
+  LANG = lang === "mn" ? "mn" : "en";
+  try { document.documentElement.lang = LANG; } catch (_) {}
+  try { document.title = t("appName"); } catch (_) {}
+  const byId = (id, key) => { const el = document.getElementById(id); if (el) el.textContent = t(key); };
+  const byQ = (sel, key) => { const el = document.querySelector(sel); if (el) el.textContent = t(key); };
+  const ariaQ = (sel, key) => { const el = document.querySelector(sel); if (el) el.setAttribute("aria-label", t(key)); };
+
+  ariaQ("#tokenEditBtn", "chooseTokenPairAria");
+  byQ("#tokenEditBtn > span:not(.token-edit-stack)", "tokensLabel");
+  ariaQ(".topbar", "playersAria");
+  // Wins counters keep their <span> count child — only the leading label moves.
+  document.querySelectorAll(".wins").forEach(el => {
+    if (el.firstChild && el.firstChild.nodeType === 3) el.firstChild.nodeValue = t("winsLabel") + " ";
+  });
+  ariaQ("#ownershipLegend", "legendAria");
+  const ownerKeys = document.querySelectorAll(".owner-key-copy");
+  if (ownerKeys[0]) {
+    const s = ownerKeys[0].querySelector("strong"), h = ownerKeys[0].querySelector("small");
+    if (s) s.textContent = t("yourPieces");
+    if (h) h.textContent = t("yourPiecesHint");
+  }
+  if (ownerKeys[1]) {
+    const s = ownerKeys[1].querySelector("strong"), h = ownerKeys[1].querySelector("small");
+    if (s) s.textContent = t("opponent");
+    if (h) h.textContent = t("opponentHint");
+  }
+  ariaQ(".board-stage", "boardAria");
+  byQ(".prep-kicker", "prepKicker");
+  byId("prepTitle", "chooseTokenPair");
+  byId("prepSubtitle", "prepSubSeat");
+  ariaQ("#tokenPickerClose", "closePicker");
+  ariaQ("#tokenSetGrid", "tokenPairsAria");
+  byQ(".selected-pair-label", "selectedLabel");
+  byQ(".waiting-text", "waitingForOpponent");
+  byQ(".waiting-note", "waitingNote");
+  byId("inviteBtn", "inviteFriend");
+  byId("playBotBtn", "playTheBot");
+  byQ("#difficultyControl > span", "botLevel");
+  const lvl = document.getElementById("difficulty");
+  if (lvl) {
+    const names = ["levelEasy", "levelMedium", "levelHard"];
+    Array.prototype.forEach.call(lvl.options, (opt, i) => { if (names[i]) opt.textContent = t(names[i]); });
+  }
+  ariaQ("#chatToggle", "quickChat");
+  byQ(".chat-picker-title", "quickChat");
+  ariaQ("#customChatBack", "backToQuickChat");
+  const chatInput = document.getElementById("customChatInput");
+  if (chatInput) { chatInput.placeholder = t("typeMessage"); chatInput.setAttribute("aria-label", t("customMessage")); }
+  byQ(".custom-chat-send", "send");
+
+  // Anything already built re-renders with the new strings.
+  try { if (chatPhrases) buildQuickChatPicker(); } catch (_) {}
+  try { if (tokenSetGrid && tokenSetGrid.children.length) buildTokenSetPicker(); } catch (_) {}
+  try { updateOwnershipCues(); } catch (_) {}
+  // Name plates carry "You"/"Bot"/"Opponent" — re-render whichever mode is live.
+  try { if (isMultiplayer) updatePlayerDisplay(); else setPlayerDisplayBot(); } catch (_) {}
+  try { if (typeof updateStatus === "function" && !gameOver) updateStatus(); } catch (_) {}
+}
+
 const MAX_CHAT_LENGTH = 80;
 
 // Every collectible is a coordinated two-sided set. The selected set always
 // styles the whole board: slot 1 gets its cyan token and slot 2 its coral rival.
 const TOKEN_SETS = [
-  { id: "whisker-rivals", name: "Whisker Rivals", sides: ["assets/tokens/whisker-rivals-1.png", "assets/tokens/whisker-rivals-2.png"] },
-  { id: "pup-parade", name: "Pup Parade", sides: ["assets/tokens/pup-parade-1.png", "assets/tokens/pup-parade-2.png"] },
-  { id: "bamboo-buddies", name: "Bamboo Buddies", sides: ["assets/tokens/bamboo-buddies-1.png", "assets/tokens/bamboo-buddies-2.png"] },
-  { id: "fox-and-frost", name: "Fox & Frost", sides: ["assets/tokens/fox-and-frost-1.png", "assets/tokens/fox-and-frost-2.png"] },
-  { id: "bunny-hop", name: "Bunny Hop", sides: ["assets/tokens/bunny-hop-1.png", "assets/tokens/bunny-hop-2.png"] },
-  { id: "pond-pals", name: "Pond Pals", sides: ["assets/tokens/pond-pals-1.png", "assets/tokens/pond-pals-2.png"] },
-  { id: "bubble-axolotls", name: "Bubble Axolotls", sides: ["assets/tokens/bubble-axolotls-1.png", "assets/tokens/bubble-axolotls-2.png"] },
-  { id: "forest-bandits", name: "Forest Bandits", sides: ["assets/tokens/forest-bandits-1.png", "assets/tokens/forest-bandits-2.png"] },
-  { id: "polar-pals", name: "Polar Pals", sides: ["assets/tokens/polar-pals-1.png", "assets/tokens/polar-pals-2.png"] },
-  { id: "honey-and-moon", name: "Honey & Moon", sides: ["assets/tokens/honey-and-moon-1.png", "assets/tokens/honey-and-moon-2.png"] },
+  { id: "whisker-rivals", sides: ["assets/tokens/whisker-rivals-1.png", "assets/tokens/whisker-rivals-2.png"] },
+  { id: "pup-parade", sides: ["assets/tokens/pup-parade-1.png", "assets/tokens/pup-parade-2.png"] },
+  { id: "bamboo-buddies", sides: ["assets/tokens/bamboo-buddies-1.png", "assets/tokens/bamboo-buddies-2.png"] },
+  { id: "fox-and-frost", sides: ["assets/tokens/fox-and-frost-1.png", "assets/tokens/fox-and-frost-2.png"] },
+  { id: "bunny-hop", sides: ["assets/tokens/bunny-hop-1.png", "assets/tokens/bunny-hop-2.png"] },
+  { id: "pond-pals", sides: ["assets/tokens/pond-pals-1.png", "assets/tokens/pond-pals-2.png"] },
+  { id: "bubble-axolotls", sides: ["assets/tokens/bubble-axolotls-1.png", "assets/tokens/bubble-axolotls-2.png"] },
+  { id: "forest-bandits", sides: ["assets/tokens/forest-bandits-1.png", "assets/tokens/forest-bandits-2.png"] },
+  { id: "polar-pals", sides: ["assets/tokens/polar-pals-1.png", "assets/tokens/polar-pals-2.png"] },
+  { id: "honey-and-moon", sides: ["assets/tokens/honey-and-moon-1.png", "assets/tokens/honey-and-moon-2.png"] },
 ];
 const DEFAULT_TOKEN_SET_ID = TOKEN_SETS[0].id;
 const TOKEN_STORAGE_KEY = "c4:token-set";
@@ -189,8 +449,8 @@ function updateOwnershipCues() {
     player2Panel.classList.toggle("is-you", mine === 2);
     player2Panel.classList.toggle("is-opponent", mine !== 2);
   }
-  if (player1SeatLabel) player1SeatLabel.textContent = mine === 1 ? "Your token · Blue" : "Opponent · Blue";
-  if (player2SeatLabel) player2SeatLabel.textContent = mine === 2 ? "Your token · Coral" : "Opponent · Coral";
+  if (player1SeatLabel) player1SeatLabel.textContent = t(mine === 1 ? "seatYours" : "seatOpponent", t("colorBlue"));
+  if (player2SeatLabel) player2SeatLabel.textContent = t(mine === 2 ? "seatYours" : "seatOpponent", t("colorCoral"));
 }
 
 function updateTokenSurfaces() {
@@ -249,23 +509,23 @@ function buildTokenSetPicker() {
     button.dataset.tokenSet = set.id;
     button.setAttribute("role", "radio");
     button.setAttribute("aria-checked", String(set.id === selectedTokenSetId));
-    button.setAttribute("aria-label", set.name + " paired tokens");
+    button.setAttribute("aria-label", tokenSetName(set));
 
     const pair = document.createElement("span");
     pair.className = "token-card-pair";
     set.sides.forEach((src, index) => {
       const image = document.createElement("img");
       image.src = src;
-      image.alt = index === 0 ? "Blue side" : "Coral side";
+      image.alt = t(index === 0 ? "blueSide" : "coralSide");
       pair.appendChild(image);
     });
 
     const name = document.createElement("span");
     name.className = "token-set-name";
-    name.textContent = set.name;
+    name.textContent = tokenSetName(set);
     const sides = document.createElement("span");
     sides.className = "token-set-sides";
-    sides.textContent = "Blue + Coral";
+    sides.textContent = t("bluePlusCoral");
     button.appendChild(pair);
     button.appendChild(name);
     button.appendChild(sides);
@@ -282,11 +542,9 @@ function showTokenPicker(phase) {
   waitingOverlay.classList.add("show");
   waitingOverlay.setAttribute("aria-hidden", "false");
   waitingOverlay.dataset.phase = nextPhase;
-  if (prepTitle) prepTitle.textContent = nextPhase === "waiting" ? "Pick a pair while we wait" : "Choose your token pair";
-  if (prepSubtitle) prepSubtitle.textContent = nextPhase === "ready"
-    ? "Your opponent is here. Choose a set, then start the match."
-    : "Choose one complete pair: Blue plays the left token and Coral the right.";
-  if (tokenConfirmBtn) tokenConfirmBtn.textContent = nextPhase === "ready" ? "Start with this pair" : "Use this pair";
+  if (prepTitle) prepTitle.textContent = t(nextPhase === "waiting" ? "pickWhileWaiting" : "chooseTokenPair");
+  if (prepSubtitle) prepSubtitle.textContent = t(nextPhase === "ready" ? "prepSubReady" : "prepSubDefault");
+  if (tokenConfirmBtn) tokenConfirmBtn.textContent = t(nextPhase === "ready" ? "startWithPair" : "useThisPair");
   refreshTokenPickerSelection();
   updateChatButton();
 }
@@ -296,7 +554,7 @@ function confirmTokenChoice() {
   if (myId) playerTokenSets[myId] = selectedTokenSetId;
   selectTokenSet(selectedTokenSetId, true);
   if (waitingForOpponent) {
-    if (tokenConfirmBtn) tokenConfirmBtn.textContent = "Pair saved ✓";
+    if (tokenConfirmBtn) tokenConfirmBtn.textContent = t("pairSaved");
     return;
   }
   hideWaiting();
@@ -500,8 +758,9 @@ function writeCheckpoint() {
 const usionSdkAvailable = Boolean(window.Usion && typeof Usion.init === "function");
 if (usionSdkAvailable) {
 Usion.init(async function(config) {
+  applyLang(detectLang(config.language)); // platform locale — before any UI is built
   myId = config.userId;
-  playerNames[myId] = config.userName || "You";
+  playerNames[myId] = config.userName || t("you");
   if (config.userAvatar) playerAvatars[myId] = config.userAvatar;
   playerTokenSets[myId] = selectedTokenSetId;
   if (config.playerIds && config.playerIds.length) {
@@ -585,7 +844,7 @@ function registerGameHandlers() {
     // Real pause: block our own input until we're back online (we can't trust
     // local state while disconnected — the opponent may have moved).
     connectionPaused = true;
-    if (!gameOver) updateStatus("Connection lost…");
+    if (!gameOver) updateStatus(t("connectionLost"));
   });
   Usion.game.onReconnect(() => {
     connectionPaused = false;
@@ -764,7 +1023,7 @@ function clearForfeitGrace() {
 function startForfeitGrace() {
   if (forfeitTimer) clearInterval(forfeitTimer);
   let secs = Math.ceil(FORFEIT_GRACE_MS / 1000);
-  updateStatus("Opponent left — waiting to rejoin… (" + secs + "s)");
+  updateStatus(t("oppLeftRejoin", secs));
   forfeitTimer = setInterval(() => {
     if (gameOver || connectedCount > 1) { // resolved or opponent returned
       clearForfeitGrace();
@@ -773,7 +1032,7 @@ function startForfeitGrace() {
     }
     secs -= 1;
     if (secs > 0) {
-      updateStatus("Opponent left — waiting to rejoin… (" + secs + "s)");
+      updateStatus(t("oppLeftRejoin", secs));
       return;
     }
     clearForfeitGrace();
@@ -787,7 +1046,7 @@ function forfeitToMe() {
   lastWinnerPlayer = myPlayer;
   recordWin(myPlayer);
   recordOutcome(myPlayer);
-  updateStatus("🎉 You win! (opponent left)");
+  updateStatus(t("youWinOppLeft"));
   showWinnerOverlay();
 }
 
@@ -799,7 +1058,7 @@ function onPlayerLeft(data) {
     // a quick rejoin resumes the game exactly where it was.
     startForfeitGrace();
   } else {
-    updateStatus("Opponent left the game");
+    updateStatus(t("oppLeftGame"));
   }
 }
 
@@ -1024,7 +1283,7 @@ function finalizeSyncRender() {
     updateStatus(winnerStatusText(lastWinnerPlayer));
     showWinnerOverlay();
   } else if (gameOver) {
-    updateStatus("TIE");
+    updateStatus(t("tie"));
     showTieOverlay();
   } else {
     updateStatus();
@@ -1171,20 +1430,20 @@ function updatePlayerDisplay() {
 
   if (p1id) {
     const isMe = p1id === myId;
-    player1Name.textContent = isMe ? "You" : (playerNames[p1id] || "Opponent");
+    player1Name.textContent = isMe ? t("you") : (playerNames[p1id] || t("opponent"));
     if (playerAvatars[p1id]) player1Avatar.src = playerAvatars[p1id];
   }
   if (p2id) {
     const isMe = p2id === myId;
-    player2Name.textContent = isMe ? "You" : (playerNames[p2id] || "Opponent");
+    player2Name.textContent = isMe ? t("you") : (playerNames[p2id] || t("opponent"));
     if (playerAvatars[p2id]) player2Avatar.src = playerAvatars[p2id];
   }
   updateTokenSurfaces();
 }
 
 function setPlayerDisplayBot() {
-  player1Name.textContent = playerNames[myId] || "You";
-  player2Name.textContent = "Bot";
+  player1Name.textContent = playerNames[myId] || t("you");
+  player2Name.textContent = t("bot");
   if (playerAvatars[myId]) player1Avatar.src = playerAvatars[myId];
   player2Avatar.src = tokenAssetForSlot(2);
   setWinsVisibility(false);
@@ -1283,7 +1542,7 @@ function resetForRematch(baseSeq, restartId) {
   pendingMoveId = null;
   lastSnapshotVersion = 0;
   hideWinnerBanner();
-  winnerPlayAgain.textContent = "Rematch";
+  winnerPlayAgain.textContent = t("rematch");
   winnerPlayAgain.disabled = false;
   winnerPlayAgain.onclick = requestRematch;
   init();
@@ -1338,7 +1597,7 @@ function normalizeChatMessage(value) {
 function buildQuickChatPicker() {
   if (!chatPhrases) return;
   chatPhrases.innerHTML = "";
-  QUICK_CHAT_PHRASES.forEach((phrase) => {
+  t("quickChatPhrases").forEach((phrase) => {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "chat-phrase";
@@ -1350,7 +1609,7 @@ function buildQuickChatPicker() {
   customButton.type = "button";
   customButton.id = "customChatToggle";
   customButton.className = "chat-phrase chat-custom-toggle";
-  customButton.textContent = "Өөрийн мессеж";
+  customButton.textContent = t("customChatToggle");
   customButton.setAttribute("aria-controls", "customChatForm");
   customButton.setAttribute("aria-expanded", String(customChatOpen));
   customButton.addEventListener("click", () => setCustomChatOpen(true, true));
@@ -1477,14 +1736,14 @@ function renderBoard() {
       cell.dataset.row = r;
       cell.dataset.col = c;
       cell.setAttribute("role", "button");
-      cell.setAttribute("aria-label", "Drop a token in column " + (c + 1));
+      cell.setAttribute("aria-label", t("dropInColumn", c + 1));
       cell.tabIndex = 0;
       if (board[r][c]) {
         const slot = board[r][c];
         const owner = ownershipForSlot(slot);
         cell.dataset.player = slot;
         cell.dataset.owner = owner;
-        cell.setAttribute("aria-label", (owner === "you" ? "Your" : "Opponent") + " token in column " + (c + 1));
+        cell.setAttribute("aria-label", t("tokenInColumn", owner, c + 1));
         const token = document.createElement("img");
         token.className = "token-art";
         token.src = tokenAssetForSlot(slot);
@@ -1500,18 +1759,18 @@ function renderBoard() {
 }
 
 function playerLabelForStatus(playerId, fallback) {
-  if (!playerId) return fallback || "Player";
-  return playerNames[playerId] || fallback || "Player";
+  if (!playerId) return fallback || t("player");
+  return playerNames[playerId] || fallback || t("player");
 }
 
 function roleNameForSlot(slot) {
-  if (slot === localPlayerSlot()) return "You";
-  if (!isMultiplayer) return "Bot";
-  return playerLabelForStatus(players[slot - 1], "Opponent");
+  if (slot === localPlayerSlot()) return t("you");
+  if (!isMultiplayer) return t("bot");
+  return playerLabelForStatus(players[slot - 1], t("opponent"));
 }
 
 function winnerStatusText(slot) {
-  return "🎉 " + roleNameForSlot(slot) + (slot === localPlayerSlot() ? " win!" : " wins!");
+  return t("winStatus", roleNameForSlot(slot), slot === localPlayerSlot());
 }
 
 function updateStatus(text) {
@@ -1530,14 +1789,14 @@ function updateStatus(text) {
       if (lastWinnerPlayer) {
         updateStatus(winnerStatusText(lastWinnerPlayer));
       } else {
-        updateStatus("TIE");
+        updateStatus(t("tie"));
       }
       return;
     }
 
     const color = current === 1 ? "#25bfe4" : "#ff6966";
     const isMine = current === localPlayerSlot();
-    const turnLabel = isMine ? "Your turn" : roleNameForSlot(current) + "'s turn";
+    const turnLabel = isMine ? t("yourTurn") : t("othersTurn", roleNameForSlot(current));
     statusEl.dataset.player = current;
     statusEl.dataset.owner = isMine ? "you" : "opponent";
     statusEl.innerHTML = '<span style="color:' + color + ';font-weight:900;">' + turnLabel + '</span>';
@@ -1549,7 +1808,7 @@ function updateStatus(text) {
   const isMine = current === 1;
   statusEl.dataset.player = current;
   statusEl.dataset.owner = isMine ? "you" : "opponent";
-  statusEl.innerHTML = '<span style="color:' + color + ';font-weight:900;">' + (isMine ? "Your turn" : "Bot's turn") + '</span>';
+  statusEl.innerHTML = '<span style="color:' + color + ';font-weight:900;">' + (isMine ? t("yourTurn") : t("botsTurn")) + '</span>';
 }
 
 
@@ -1640,18 +1899,18 @@ function syncRematchUi() {
 
   if (rematchState === "requested") {
     if (rematchRequested) {
-      winnerPlayAgain.textContent = isTie ? "Waiting for restart..." : "Waiting for rematch...";
+      winnerPlayAgain.textContent = t(isTie ? "waitingForRestart" : "waitingForRematch");
       winnerPlayAgain.disabled = true;
       winnerPlayAgain.onclick = requestRematch;
     } else {
-      winnerPlayAgain.textContent = isTie ? "Restart Game" : "Accept Rematch";
+      winnerPlayAgain.textContent = t(isTie ? "restartGame" : "acceptRematch");
       winnerPlayAgain.disabled = false;
       winnerPlayAgain.onclick = acceptRematch;
     }
     return;
   }
 
-  winnerPlayAgain.textContent = isTie ? "Restart Game" : "Rematch";
+  winnerPlayAgain.textContent = t(isTie ? "restartGame" : "rematch");
   winnerPlayAgain.disabled = false;
   winnerPlayAgain.onclick = requestRematch;
 }
@@ -1664,7 +1923,7 @@ function showWinnerOverlay() {
 
   winnerBanner.classList.remove("tie-result");
   winnerNameDisplay.textContent = winnerName;
-  if (winnerVerb) winnerVerb.textContent = lastWinnerPlayer === localPlayerSlot() ? " win the shelf!" : " wins the shelf!";
+  if (winnerVerb) winnerVerb.textContent = t(lastWinnerPlayer === localPlayerSlot() ? "winTheShelf" : "winsTheShelf");
   winnerNameDisplay.style.color = color;
   winnerEmoji.textContent = "🏆";
   showWinnerBanner();
@@ -1674,7 +1933,7 @@ function showWinnerOverlay() {
 function showTieOverlay() {
   if (!gameOver || lastWinnerPlayer) return;
   winnerBanner.classList.add("tie-result");
-  winnerNameDisplay.textContent = "TIE";
+  winnerNameDisplay.textContent = t("tie");
   winnerNameDisplay.style.color = "#b87908";
   if (winnerVerb) winnerVerb.textContent = "";
   winnerEmoji.textContent = "🤝";
@@ -1683,7 +1942,7 @@ function showTieOverlay() {
   if (isMultiplayer) {
     syncRematchUi();
   } else {
-    winnerPlayAgain.textContent = "Restart Game";
+    winnerPlayAgain.textContent = t("restartGame");
     winnerPlayAgain.disabled = false;
     winnerPlayAgain.onclick = () => {
       hideWinnerBanner();
@@ -1780,7 +2039,7 @@ function applyBoardSnapshot(snapshot, senderId, trusted) {
     showWinnerOverlay();
   } else if (isFull()) {
     recordOutcome(0);
-    updateStatus("TIE");
+    updateStatus(t("tie"));
     showTieOverlay();
   } else {
     updateStatus();
@@ -1874,7 +2133,7 @@ function handleMove(col, local = true) {
 
         setTimeout(() => {
           winnerNameDisplay.textContent = name;
-          if (winnerVerb) winnerVerb.textContent = player === localPlayerSlot() ? " win the shelf!" : " wins the shelf!";
+          if (winnerVerb) winnerVerb.textContent = t(player === localPlayerSlot() ? "winTheShelf" : "winsTheShelf");
           winnerNameDisplay.style.color = color;
           winnerEmoji.textContent = "🏆";
           showWinnerBanner();
@@ -1884,7 +2143,7 @@ function handleMove(col, local = true) {
             rematchState = "idle";
             syncRematchUi();
           } else {
-            winnerPlayAgain.textContent = "Play Again";
+            winnerPlayAgain.textContent = t("playAgain");
             winnerPlayAgain.disabled = false;
             winnerPlayAgain.onclick = () => {
               hideWinnerBanner();
@@ -1894,7 +2153,7 @@ function handleMove(col, local = true) {
         }, 600);
 
       } else if (isDraw) {
-        updateStatus("TIE");
+        updateStatus(t("tie"));
         setTimeout(showTieOverlay, 320);
       }
     });
@@ -2116,6 +2375,7 @@ function minimax(b, depth, alpha, beta, maximizing) {
 }
 
 // ── Boot ──────────────────────────────────────────────────
+applyLang(detectLang());   // best-effort locale before the host is known
 setWinsVisibility(false);
 syncControlVisibility();
 if (!usionSdkAvailable) {
