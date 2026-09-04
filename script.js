@@ -54,17 +54,17 @@ const STR = {
     // chat
     quickChat: "Quick chat",
     customMessage: "Custom message",
-    customChatToggle: "Custom message",
+    customChatToggle: "Өөрийн мессеж",
     backToQuickChat: "Back to quick chat",
     typeMessage: "Type a message…",
     send: "Send",
     quickChatPhrases: [
-      "nice one",
-      "you got lucky",
-      "got you!",
-      "hurry up",
-      "oh no",
-      "not tasty at all",
+      "юм авцаан",
+      "чи болчихжээ",
+      "би болчихжээ",
+      "хурдлаад өгөөрэй",
+      "муу юм бэ",
+      "амтагдахгүй юм байна дөө",
       "EASY!",
       "GG!",
     ],
@@ -91,16 +91,16 @@ const STR = {
     waitingForRestart: "Waiting for restart...",
     playAgain: "Play Again",
     // token set names
-    "set_pup-parade": "Pup Parade",
-    "set_bamboo-buddies": "Bamboo Buddies",
-    "set_fox-and-frost": "Fox & Frost",
-    "set_bunny-hop": "Bunny Hop",
-    "set_pond-pals": "Pond Pals",
-    "set_bubble-axolotls": "Bubble Axolotls",
-    "set_forest-bandits": "Forest Bandits",
-    "set_polar-pals": "Polar Pals",
-    "set_honey-and-moon": "Honey & Moon",
-    "set_whisker-rivals": "Whisker Rivals",
+    "set_prism-pals": "Prism Pals",
+    "set_orbit-buddies": "Orbit Buddies",
+    "set_snack-spirits": "Snack Spirits",
+    "set_garden-charms": "Garden Charms",
+    "set_royal-blooms": "Royal Blooms",
+    "set_cozy-capybaras": "Cozy Capybaras",
+    "set_sky-friends": "Sky Friends",
+    "set_forest-sprites": "Forest Sprites",
+    "set_ocean-minis": "Ocean Minis",
+    "set_tiny-dragons": "Tiny Dragons",
   },
   mn: {
     appName: "Дөрвөн эгнээ",
@@ -177,16 +177,16 @@ const STR = {
     waitingForRematch: "Дахин тулахыг хүлээж байна...",
     waitingForRestart: "Дахин эхлүүлэхийг хүлээж байна...",
     playAgain: "Дахин тоглох",
-    "set_whisker-rivals": "Сахалт өрсөлдөгчид",
-    "set_pup-parade": "Гөлөгний жагсаал",
-    "set_bamboo-buddies": "Хулсан нөхөд",
-    "set_fox-and-frost": "Үнэг ба Хяруу",
-    "set_bunny-hop": "Туулайн үсрэлт",
-    "set_pond-pals": "Цөөрмийн нөхөд",
-    "set_bubble-axolotls": "Бөмбөлөгт аксолотл",
-    "set_forest-bandits": "Ойн дээрэмчид",
-    "set_polar-pals": "Туйлын нөхөд",
-    "set_honey-and-moon": "Зөгийн бал ба Сар",
+    "set_prism-pals": "Призмэн нөхөд",
+    "set_orbit-buddies": "Сансрын нөхөд",
+    "set_snack-spirits": "Амттаны сахиус",
+    "set_garden-charms": "Цэцэрлэгийн чимэг",
+    "set_royal-blooms": "Хааны цэцэгс",
+    "set_cozy-capybaras": "Тухтай капибара",
+    "set_sky-friends": "Тэнгэрийн нөхөд",
+    "set_forest-sprites": "Ойн сахиус",
+    "set_ocean-minis": "Далайн бяцханууд",
+    "set_tiny-dragons": "Бяцхан луунууд",
   },
 };
 let LANG = "en";
@@ -203,7 +203,10 @@ function detectLang(cfgLang) {
   if (!src) {
     try { src = window.Usion && window.Usion.getLanguage && window.Usion.getLanguage(); } catch (_) {}
   }
-  if (!src) src = (navigator.languages && navigator.languages[0]) || navigator.language || "en";
+  if (!src && typeof navigator !== "undefined") {
+    src = (navigator.languages && navigator.languages[0]) || navigator.language;
+  }
+  if (!src) src = "en";
   return String(src).toLowerCase().indexOf("mn") === 0 ? "mn" : "en";
 }
 function tokenSetName(set) { return set ? t("set_" + set.id) : ""; }
@@ -249,7 +252,7 @@ function applyLang(lang) {
   byId("playBotBtn", "playTheBot");
   byQ("#difficultyControl > span", "botLevel");
   const lvl = document.getElementById("difficulty");
-  if (lvl) {
+  if (lvl && lvl.options) {
     const names = ["levelEasy", "levelMedium", "levelHard"];
     Array.prototype.forEach.call(lvl.options, (opt, i) => { if (names[i]) opt.textContent = t(names[i]); });
   }
@@ -272,18 +275,18 @@ function applyLang(lang) {
 const MAX_CHAT_LENGTH = 80;
 
 // Every collectible is a coordinated two-sided set. The selected set always
-// styles the whole board: slot 1 gets its cyan token and slot 2 its coral rival.
+// styles the whole board: slot 1 gets the first token and slot 2 its paired rival.
 const TOKEN_SETS = [
-  { id: "whisker-rivals", sides: ["assets/tokens/whisker-rivals-1.png", "assets/tokens/whisker-rivals-2.png"] },
-  { id: "pup-parade", sides: ["assets/tokens/pup-parade-1.png", "assets/tokens/pup-parade-2.png"] },
-  { id: "bamboo-buddies", sides: ["assets/tokens/bamboo-buddies-1.png", "assets/tokens/bamboo-buddies-2.png"] },
-  { id: "fox-and-frost", sides: ["assets/tokens/fox-and-frost-1.png", "assets/tokens/fox-and-frost-2.png"] },
-  { id: "bunny-hop", sides: ["assets/tokens/bunny-hop-1.png", "assets/tokens/bunny-hop-2.png"] },
-  { id: "pond-pals", sides: ["assets/tokens/pond-pals-1.png", "assets/tokens/pond-pals-2.png"] },
-  { id: "bubble-axolotls", sides: ["assets/tokens/bubble-axolotls-1.png", "assets/tokens/bubble-axolotls-2.png"] },
-  { id: "forest-bandits", sides: ["assets/tokens/forest-bandits-1.png", "assets/tokens/forest-bandits-2.png"] },
-  { id: "polar-pals", sides: ["assets/tokens/polar-pals-1.png", "assets/tokens/polar-pals-2.png"] },
-  { id: "honey-and-moon", sides: ["assets/tokens/honey-and-moon-1.png", "assets/tokens/honey-and-moon-2.png"] },
+  { id: "prism-pals", sides: ["assets/tokens/prism-pals-1.png", "assets/tokens/prism-pals-2.png"] },
+  { id: "orbit-buddies", sides: ["assets/tokens/orbit-buddies-1.png", "assets/tokens/orbit-buddies-2.png"] },
+  { id: "snack-spirits", sides: ["assets/tokens/snack-spirits-1.png", "assets/tokens/snack-spirits-2.png"] },
+  { id: "garden-charms", sides: ["assets/tokens/garden-charms-1.png", "assets/tokens/garden-charms-2.png"] },
+  { id: "royal-blooms", sides: ["assets/tokens/royal-blooms-1.png", "assets/tokens/royal-blooms-2.png"] },
+  { id: "cozy-capybaras", sides: ["assets/tokens/cozy-capybaras-1.png", "assets/tokens/cozy-capybaras-2.png"] },
+  { id: "sky-friends", sides: ["assets/tokens/sky-friends-1.png", "assets/tokens/sky-friends-2.png"] },
+  { id: "forest-sprites", sides: ["assets/tokens/forest-sprites-1.png", "assets/tokens/forest-sprites-2.png"] },
+  { id: "ocean-minis", sides: ["assets/tokens/ocean-minis-1.png", "assets/tokens/ocean-minis-2.png"] },
+  { id: "tiny-dragons", sides: ["assets/tokens/tiny-dragons-1.png", "assets/tokens/tiny-dragons-2.png"] },
 ];
 const DEFAULT_TOKEN_SET_ID = TOKEN_SETS[0].id;
 const TOKEN_STORAGE_KEY = "c4:token-set";
@@ -466,7 +469,7 @@ function updateTokenSurfaces() {
 
 function refreshTokenPickerSelection() {
   const selected = tokenSetById(selectedTokenSetId);
-  if (selectedTokenName) selectedTokenName.textContent = selected.name;
+  if (selectedTokenName) selectedTokenName.textContent = tokenSetName(selected);
   if (!tokenSetGrid) return;
   Array.from(tokenSetGrid.children || []).forEach((card) => {
     card.setAttribute("aria-checked", String(card.dataset.tokenSet === selectedTokenSetId));
