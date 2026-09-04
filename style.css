@@ -380,35 +380,7 @@ button:focus-visible,select:focus-visible,input:focus-visible,.cell:focus-visibl
   width:max-content;
   max-width:100%;
   margin:13px auto 8px;
-  padding-top:11px;
   filter:drop-shadow(0 20px 16px rgba(0,0,0,.34));
-}
-
-.board-lip{
-  position:absolute;
-  z-index:2;
-  top:0;
-  left:15px;
-  right:15px;
-  height:23px;
-  padding:0 12px;
-  display:grid;
-  grid-template-columns:repeat(7,1fr);
-  gap:var(--cell-gap);
-  align-items:center;
-  border:2px solid var(--board-edge);
-  border-bottom:0;
-  border-radius:18px 18px 3px 3px;
-  background:linear-gradient(var(--board-light),var(--board-mid));
-  box-shadow:inset 0 4px rgba(255,255,255,.18);
-}
-
-.board-lip span{
-  justify-self:center;
-  width:11px;
-  height:5px;
-  border-radius:99px;
-  background:rgba(255,245,223,.65);
 }
 
 #board{
@@ -429,27 +401,6 @@ button:focus-visible,select:focus-visible,input:focus-visible,.cell:focus-visibl
     inset 0 -10px rgba(1,28,77,.3),
     0 8px 0 var(--board-edge);
 }
-
-.board-foot{
-  position:relative;
-  z-index:1;
-  height:22px;
-  margin:4px 24px 0;
-  border-radius:0 0 18px 18px;
-  background:var(--board-edge);
-  box-shadow:inset 0 -4px rgba(0,0,0,.15);
-}
-
-.board-foot span{
-  position:absolute;
-  bottom:-9px;
-  width:42px;
-  height:14px;
-  border-radius:0 0 10px 10px;
-  background:var(--board-shadow);
-}
-.board-foot span:first-child{left:20px}
-.board-foot span:last-child{right:20px}
 
 .cell{
   position:relative;
