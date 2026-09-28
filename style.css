@@ -18,6 +18,12 @@
   --green:#64c98a;
   --cell-size:clamp(34px,10.35vw,52px);
   --cell-gap:clamp(5px,1.6vw,8px);
+  /* Usion GameTok runs edge to edge: the room bleeds under the notch and the
+     home indicator, every control stays inside these insets. */
+  --safe-top:env(safe-area-inset-top,0px);
+  --safe-right:env(safe-area-inset-right,0px);
+  --safe-bottom:env(safe-area-inset-bottom,0px);
+  --safe-left:env(safe-area-inset-left,0px);
   color-scheme:dark;
 }
 
@@ -84,7 +90,7 @@ button:focus-visible,select:focus-visible,input:focus-visible,.cell:focus-visibl
   width:100%;
   max-width:560px;
   min-height:100svh;
-  padding:max(22px,env(safe-area-inset-top)) 18px max(28px,env(safe-area-inset-bottom));
+  padding:max(22px,calc(var(--safe-top) + 10px)) max(18px,var(--safe-right)) max(28px,calc(var(--safe-bottom) + 12px)) max(18px,var(--safe-left));
   display:flex;
   flex-direction:column;
   align-items:center;
@@ -611,7 +617,7 @@ select option{background:var(--night);color:var(--paper)}
   position:fixed;
   inset:0;
   z-index:80;
-  padding:max(14px,env(safe-area-inset-top)) 14px max(14px,env(safe-area-inset-bottom));
+  padding:max(14px,calc(var(--safe-top) + 10px)) max(14px,var(--safe-right)) max(14px,calc(var(--safe-bottom) + 10px)) max(14px,var(--safe-left));
   align-items:center;
   justify-content:center;
   background:rgba(7,16,34,.78);
@@ -624,7 +630,7 @@ select option{background:var(--night);color:var(--paper)}
 
 .waiting-card{
   width:min(620px,100%);
-  max-height:min(820px,calc(100svh - 28px));
+  max-height:min(820px,100%);
   overflow:hidden;
   border:1px solid rgba(255,255,255,.13);
   border-radius:28px;
@@ -798,8 +804,8 @@ select option{background:var(--night);color:var(--paper)}
 .chat-toggle{
   display:none;
   position:fixed;
-  right:max(16px,env(safe-area-inset-right));
-  bottom:max(16px,env(safe-area-inset-bottom));
+  right:max(16px,var(--safe-right));
+  bottom:calc(var(--safe-bottom) + 16px);
   z-index:70;
   width:50px;
   height:50px;
@@ -820,8 +826,8 @@ select option{background:var(--night);color:var(--paper)}
 .chat-picker{
   --chat-keyboard-inset:0px;
   position:fixed;
-  right:max(16px,env(safe-area-inset-right));
-  bottom:calc(max(16px,env(safe-area-inset-bottom)) + 62px + var(--chat-keyboard-inset));
+  right:max(16px,var(--safe-right));
+  bottom:calc(var(--safe-bottom) + 16px + 62px + var(--chat-keyboard-inset));
   z-index:71;
   width:min(336px,calc(100vw - 32px));
   padding:12px;
@@ -919,18 +925,17 @@ select option{background:var(--night);color:var(--paper)}
 }
 
 @media (max-height:700px){
-  .game-shell{padding-top:12px}
+  .game-shell{padding-top:max(12px,calc(var(--safe-top) + 10px))}
   .game-heading{margin-bottom:10px}
   .topbar{margin-bottom:9px}
   .board-stage{margin-top:13px}
   .controls{margin-top:10px}
-  .waiting-card{max-height:calc(100svh - 18px)}
   .token-set-card{min-height:118px}
 }
 
 @media (max-width:600px),(pointer:coarse){
   .chat-toggle.custom-mode{visibility:hidden;pointer-events:none}
-  .chat-picker.custom-mode{right:max(8px,env(safe-area-inset-right));bottom:calc(max(8px,env(safe-area-inset-bottom)) + var(--chat-keyboard-inset));width:min(440px,calc(100vw - 16px));max-height:none;padding:8px;overflow:visible;transform-origin:bottom center}
+  .chat-picker.custom-mode{right:max(8px,var(--safe-right));bottom:calc(var(--safe-bottom) + 8px + var(--chat-keyboard-inset));width:min(440px,calc(100vw - 16px));max-height:none;padding:8px;overflow:visible;transform-origin:bottom center}
   .chat-picker.custom-mode .chat-picker-title,.chat-picker.custom-mode .chat-phrases{display:none}
   .chat-picker.custom-mode .custom-chat-form{margin:0}
 }
