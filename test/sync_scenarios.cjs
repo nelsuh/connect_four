@@ -144,6 +144,24 @@ test("custom quick chat opens the composer and synchronizes typed text", async (
   eq(guest.doc.querySelectorAll(".reaction-bubble")[0].textContent, "Great match!", "opponent receives custom text");
 });
 
+test("emoji reactions send through quick chat and render as big bubbles", async () => {
+  const { world, host, guest } = await onlinePair();
+  host.doc.getElementById("chatToggle").dispatch("click");
+  const emojis = host.doc.querySelectorAll(".chat-emoji");
+  eq(Array.from(emojis).map((button) => button.textContent), ["😂", "😘", "😔", "😡", "😱", "😜", "😎", "🔥", "🎉", "😴", "👏", "👍"], "emoji row order");
+  eq(host.doc.getElementById("chatEmojis").getAttribute("aria-label"), "Reactions", "emoji row is labelled");
+  emojis[7].dispatch("click");
+  await world.advance(300);
+
+  const mine = host.doc.querySelectorAll(".reaction-bubble");
+  const theirs = guest.doc.querySelectorAll(".reaction-bubble");
+  eq(mine.length, 1, "sender sees their emoji bubble");
+  eq(theirs.length, 1, "opponent receives the emoji bubble");
+  eq(theirs[0].textContent, "🔥", "opponent sees the emoji");
+  ok(mine[0].classList.contains("is-emoji") && theirs[0].classList.contains("is-emoji"), "emoji bubbles render large");
+  ok(!host.doc.getElementById("chatPicker").classList.contains("show"), "picker closes after sending");
+});
+
 test("a rejoining client hydrates a checkpoint even when join sequence is equal", async () => {
   const { world, host, guest, roster } = await onlinePair();
   await play(world, host, 2);

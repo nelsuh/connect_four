@@ -55,6 +55,7 @@ const STR = {
     quickChat: "Quick chat",
     customMessage: "Custom message",
     customChatToggle: "Өөрийн мессеж",
+    reactions: "Reactions",
     backToQuickChat: "Back to quick chat",
     typeMessage: "Type a message…",
     send: "Send",
@@ -145,6 +146,7 @@ const STR = {
     quickChat: "Түргэн чат",
     customMessage: "Өөрийн мессеж",
     customChatToggle: "Өөрийн мессеж",
+    reactions: "Хариу үйлдэл",
     backToQuickChat: "Түргэн чат руу буцах",
     typeMessage: "Мессежээ бичнэ үү…",
     send: "Илгээх",
@@ -257,6 +259,7 @@ function applyLang(lang) {
     Array.prototype.forEach.call(lvl.options, (opt, i) => { if (names[i]) opt.textContent = t(names[i]); });
   }
   ariaQ("#chatToggle", "quickChat");
+  ariaQ("#chatEmojis", "reactions");
   byQ(".chat-picker-title", "quickChat");
   ariaQ("#customChatBack", "backToQuickChat");
   const chatInput = document.getElementById("customChatInput");
@@ -273,6 +276,7 @@ function applyLang(lang) {
 }
 
 const MAX_CHAT_LENGTH = 80;
+const CHAT_EMOJIS = ["😂", "😘", "😔", "😡", "😱", "😜", "😎", "🔥", "🎉", "😴", "👏", "👍"];
 
 // Every collectible is a coordinated two-sided set. The selected set always
 // styles the whole board: slot 1 gets the first token and slot 2 its paired rival.
@@ -1597,7 +1601,26 @@ function normalizeChatMessage(value) {
   return message && message.length <= MAX_CHAT_LENGTH ? message : "";
 }
 
+// Tap-to-send emoji reactions. They ride the same quick_chat path as phrases
+// (rate limit, length cap, own bubble, picker close); a bubble whose text is
+// exactly one of these renders large.
+function buildChatEmojiRow() {
+  const row = document.getElementById("chatEmojis");
+  if (!row) return;
+  row.innerHTML = "";
+  row.setAttribute("aria-label", t("reactions"));
+  CHAT_EMOJIS.forEach((emoji) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "chat-emoji";
+    button.textContent = emoji;
+    button.addEventListener("click", () => sendQuickChat(emoji));
+    row.appendChild(button);
+  });
+}
+
 function buildQuickChatPicker() {
+  buildChatEmojiRow();
   if (!chatPhrases) return;
   chatPhrases.innerHTML = "";
   t("quickChatPhrases").forEach((phrase) => {
@@ -1690,6 +1713,7 @@ function showQuickChatBubble(player, value) {
   const bubble = document.createElement("div");
   bubble.className = "reaction-bubble player-" + player;
   bubble.textContent = phrase;
+  if (CHAT_EMOJIS.includes(phrase)) bubble.classList.add("is-emoji");
   reactionLayer.appendChild(bubble);
 
   const width = bubble.offsetWidth;
