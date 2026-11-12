@@ -948,3 +948,59 @@ select option{background:var(--night);color:var(--paper)}
 @media (prefers-reduced-motion:reduce){
   *,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;scroll-behavior:auto!important;transition-duration:.01ms!important}
 }
+
+/* ── Classic skin (default): red vs yellow chips in a royal-blue board ── */
+body[data-skin="classic"]{
+  --blue:#ef2b2d;
+  --blue-deep:#c4161f;
+  --coral:#ffc928;
+  --coral-deep:#b97b00;
+  --board-light:#3b44f0;
+  --board-mid:#2329d4;
+  --board-deep:#171cb0;
+  --board-edge:#10148a;
+  --board-shadow:#0a0d5c;
+}
+body[data-skin="classic"] #board{
+  border-color:#1a1fb8;
+  background:
+    radial-gradient(120% 80% at 50% 0%,rgba(120,130,255,.28),transparent 60%),
+    linear-gradient(180deg,var(--board-light) 0%,var(--board-mid) 50%,var(--board-deep) 100%);
+  box-shadow:
+    inset 0 3px rgba(255,255,255,.18),
+    inset 0 -6px rgba(5,8,90,.35),
+    0 7px 0 var(--board-edge);
+}
+body[data-skin="classic"] .cell,
+body[data-skin="classic"] .cell[data-player]{
+  border:2px solid rgba(150,160,255,.45);
+  background:radial-gradient(circle at 50% 35%,#0c1270 0%,#060a4a 70%,#040733 100%);
+  box-shadow:
+    inset 0 6px 8px rgba(0,0,20,.8),
+    0 1px 0 rgba(255,255,255,.18);
+}
+body[data-skin="classic"] .cell::before{display:none}
+body[data-skin="classic"] .cell[data-player] .token-art,
+body[data-skin="classic"] .drop-disk[data-player] .token-art{
+  width:92%;
+  height:92%;
+  border:0;
+  outline:0;
+  filter:drop-shadow(0 3px 2px rgba(0,0,30,.55));
+}
+body[data-skin="classic"] .cell[data-owner]::after{display:none}
+body[data-skin="classic"] .cell.winner .token-art{filter:drop-shadow(0 0 8px #ffe680) drop-shadow(0 0 3px #fff3b0) brightness(1.08)}
+body[data-skin="classic"] .owner-token-frame{border-width:2px;border-style:solid;padding:0}
+body[data-skin="classic"] .owner-token-frame::after{display:none}
+body[data-skin="classic"]{
+  --night:#151a5e;
+  --night-deep:#0b0e3d;
+  background:
+    radial-gradient(ellipse 90% 55% at 50% 52%,rgba(70,86,255,.32) 0%,transparent 70%),
+    radial-gradient(ellipse 120% 70% at 50% -8%,#2a37a8 0%,transparent 60%),
+    linear-gradient(180deg,#121766 0%,#0b0e3d 55%,#070926 100%);
+  background-size:auto;
+  background-attachment:fixed;
+}
+html:has(body[data-skin="classic"]){background:#070926}
+body[data-skin="classic"] .room-glow{display:none}

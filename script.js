@@ -21,6 +21,13 @@ const STR = {
     seatOpponent: (color) => "Opponent · " + color,
     colorBlue: "Blue",
     colorCoral: "Coral",
+    colorRed: "Red",
+    colorYellow: "Yellow",
+    redSide: "Red side",
+    yellowSide: "Yellow side",
+    redPlusYellow: "Red + Yellow",
+    "set_classic": "Classic",
+    chipsOfColor: (color) => color + " chips",
     // ownership legend
     legendAria: "Token ownership guide",
     yourPieces: "Your pieces",
@@ -35,7 +42,7 @@ const STR = {
     pickWhileWaiting: "Pick a pair while we wait",
     chooseTokenPair: "Choose your token pair",
     prepSubReady: "Your opponent is here. Choose a set, then start the match.",
-    prepSubDefault: "Choose one complete pair: Blue plays the left token and Coral the right.",
+    prepSubDefault: "Choose one complete pair: player one plays the left token, player two the right.",
     prepSubSeat: "Pick a set now. Your seat decides which side you play.",
     startWithPair: "Start with this pair",
     useThisPair: "Use this pair",
@@ -117,6 +124,13 @@ const STR = {
     seatOpponent: (color) => "Өрсөлдөгч · " + color,
     colorBlue: "Цэнхэр",
     colorCoral: "Шүрэн",
+    colorRed: "Улаан",
+    colorYellow: "Шар",
+    redSide: "Улаан тал",
+    yellowSide: "Шар тал",
+    redPlusYellow: "Улаан + Шар",
+    "set_classic": "Сонгодог",
+    chipsOfColor: (color) => color + " хүүхэлдэй",
     legendAria: "Хэний хүүхэлдэй вэ гэдгийн заавар",
     yourPieces: "Таных",
     yourPiecesHint: "Бүтэн хүрээ + цэг",
@@ -129,7 +143,7 @@ const STR = {
     pickWhileWaiting: "Хүлээж байхдаа хосоо сонго",
     chooseTokenPair: "Хүүхэлдэйн хосоо сонго",
     prepSubReady: "Өрсөлдөгч чинь ирлээ. Багцаа сонгоод тулаанаа эхлүүл.",
-    prepSubDefault: "Бүтэн нэг хос сонго: Цэнхэр зүүн хүүхэлдэйгээр, Шүрэн баруунаар тоглоно.",
+    prepSubDefault: "Бүтэн нэг хос сонго: 1-р тоглогч зүүн хүүхэлдэйгээр, 2-р тоглогч баруунаар тоглоно.",
     prepSubSeat: "Одоо багцаа сонго. Аль талд тоглох нь суудлаас чинь шалтгаална.",
     startWithPair: "Энэ хосоор эхлэх",
     useThisPair: "Энэ хосыг сонгох",
@@ -280,7 +294,11 @@ const CHAT_EMOJIS = ["😂", "😘", "😔", "😡", "😱", "😜", "😎", "�
 
 // Every collectible is a coordinated two-sided set. The selected set always
 // styles the whole board: slot 1 gets the first token and slot 2 its paired rival.
+const BLUE_CORAL = { colors: ["colorBlue", "colorCoral"], sideNames: ["blueSide", "coralSide"], pairName: "bluePlusCoral" };
 const TOKEN_SETS = [
+  // Default: the familiar red-vs-yellow look on a royal-blue board (body[data-skin="classic"]).
+  { id: "classic", skin: "classic", sides: ["assets/tokens/classic-1.svg", "assets/tokens/classic-2.svg"],
+    colors: ["colorRed", "colorYellow"], sideNames: ["redSide", "yellowSide"], pairName: "redPlusYellow" },
   { id: "prism-pals", sides: ["assets/tokens/prism-pals-1.png", "assets/tokens/prism-pals-2.png"] },
   { id: "orbit-buddies", sides: ["assets/tokens/orbit-buddies-1.png", "assets/tokens/orbit-buddies-2.png"] },
   { id: "snack-spirits", sides: ["assets/tokens/snack-spirits-1.png", "assets/tokens/snack-spirits-2.png"] },
@@ -422,6 +440,10 @@ function tokenSetById(id) {
   return TOKEN_SETS.find((set) => set.id === id) || TOKEN_SETS[0];
 }
 
+function tokenSetLabels(set) {
+  return set && set.colors ? set : BLUE_CORAL;
+}
+
 function tokenSetIdForSlot(slot) {
   // A catalog card is one complete versus set, never two mix-and-match skins.
   // Multiplayer players can keep their own cosmetic preference locally, while
@@ -456,8 +478,15 @@ function updateOwnershipCues() {
     player2Panel.classList.toggle("is-you", mine === 2);
     player2Panel.classList.toggle("is-opponent", mine !== 2);
   }
-  if (player1SeatLabel) player1SeatLabel.textContent = t(mine === 1 ? "seatYours" : "seatOpponent", t("colorBlue"));
-  if (player2SeatLabel) player2SeatLabel.textContent = t(mine === 2 ? "seatYours" : "seatOpponent", t("colorCoral"));
+  const labels = tokenSetLabels(tokenSetById(selectedTokenSetId));
+  if (player1SeatLabel) player1SeatLabel.textContent = t(mine === 1 ? "seatYours" : "seatOpponent", t(labels.colors[0]));
+  if (player2SeatLabel) player2SeatLabel.textContent = t(mine === 2 ? "seatYours" : "seatOpponent", t(labels.colors[1]));
+  // Classic chips carry no rim/marker: the legend names the colour instead.
+  const plain = !!tokenSetById(selectedTokenSetId).skin;
+  const yourHint = yourOwnerKey && yourOwnerKey.querySelector("small");
+  const oppHint = opponentOwnerKey && opponentOwnerKey.querySelector("small");
+  if (yourHint) yourHint.textContent = plain ? t("chipsOfColor", t(labels.colors[mine - 1])) : t("yourPiecesHint");
+  if (oppHint) oppHint.textContent = plain ? t("chipsOfColor", t(labels.colors[opponent - 1])) : t("opponentHint");
 }
 
 function updateTokenSurfaces() {
@@ -466,6 +495,10 @@ function updateTokenSurfaces() {
   if (player1Token) player1Token.src = sideOne;
   if (player2Token) player2Token.src = sideTwo;
   const ownSet = tokenSetById(selectedTokenSetId);
+  try {
+    if (ownSet.skin) document.body.dataset.skin = ownSet.skin;
+    else delete document.body.dataset.skin;
+  } catch (_) {}
   if (tokenEditPreview1) tokenEditPreview1.src = ownSet.sides[0];
   if (tokenEditPreview2) tokenEditPreview2.src = ownSet.sides[1];
   updateOwnershipCues();
@@ -523,7 +556,7 @@ function buildTokenSetPicker() {
     set.sides.forEach((src, index) => {
       const image = document.createElement("img");
       image.src = src;
-      image.alt = t(index === 0 ? "blueSide" : "coralSide");
+      image.alt = t(tokenSetLabels(set).sideNames[index]);
       pair.appendChild(image);
     });
 
@@ -532,7 +565,7 @@ function buildTokenSetPicker() {
     name.textContent = tokenSetName(set);
     const sides = document.createElement("span");
     sides.className = "token-set-sides";
-    sides.textContent = t("bluePlusCoral");
+    sides.textContent = t(tokenSetLabels(set).pairName);
     button.appendChild(pair);
     button.appendChild(name);
     button.appendChild(sides);
@@ -765,6 +798,7 @@ function writeCheckpoint() {
 const usionSdkAvailable = Boolean(window.Usion && typeof Usion.init === "function");
 if (usionSdkAvailable) {
 Usion.init(async function(config) {
+  hostReady();
   applyLang(detectLang(config.language)); // platform locale — before any UI is built
   myId = config.userId;
   playerNames[myId] = config.userName || t("you");
@@ -1848,7 +1882,7 @@ boardEl.addEventListener("keydown", (e) => {
 });
 
 boardEl.addEventListener("click", (e) => {
-  if (gameOver) return;
+  if (gameOver || awaitingHost) return;
 
   const cell = e.target.closest(".cell");
   if (!cell) return;
@@ -2405,6 +2439,30 @@ function minimax(b, depth, alpha, beta, maximizing) {
 applyLang(detectLang());   // best-effort locale before the host is known
 setWinsVisibility(false);
 syncControlVisibility();
+// Never show an empty cabinet while the host handshake is in flight: draw the
+// empty grid right away (input stays locked until the host answers or we fall
+// back to the solo game).
+// var + guard: Usion.init may call back (hostReady) before these lines run.
+var awaitingHost;
+if (awaitingHost === undefined) awaitingHost = usionSdkAvailable;
+var hostFallbackTimer;
+function hostReady() {
+  awaitingHost = false;
+  if (hostFallbackTimer) { clearTimeout(hostFallbackTimer); hostFallbackTimer = null; }
+}
+if (awaitingHost && board.length !== ROWS) {
+  board = Array.from({ length: ROWS }, () => Array(COLS).fill(0));
+  updateTokenSurfaces();
+  renderBoard();
+  // The SDK loaded but no host ever calls back (opened outside Usion): play the bot.
+  hostFallbackTimer = setTimeout(() => {
+    if (!awaitingHost) return;
+    hostReady();
+    hideWaiting();
+    setPlayerDisplayBot();
+    init();
+  }, 2500);
+}
 if (!usionSdkAvailable) {
   // Direct local-file preview: the hosted Usion SDK can be unavailable when
   // index.html is opened from disk. Keep the complete solo game usable instead
