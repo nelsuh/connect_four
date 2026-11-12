@@ -317,10 +317,12 @@ test("rematch offer, restart, and post-rematch rejoin are durable", async () => 
   await world.advance(400);
   assertConsistent(host, guest, "restart");
   eq(countDisks(host.snap().board), 0);
-  eq(host.snap().current, 1);
+  const opener = host.snap().current; // random seat, identical on both clients
+  ok(opener === 1 || opener === 2, "rematch opens with a real seat");
   ok(!host.snap().gameOver);
 
-  await play(world, host, 4);
+  await play(world, opener === 1 ? host : guest, 4);
+  eq(countDisks(host.snap().board), 1, "the opening seat may move");
   guest.sdk.netDrop(true);
   await world.advance(100);
   const replacement = world.add("u2", "Bob");
@@ -328,7 +330,7 @@ test("rematch offer, restart, and post-rematch rejoin are durable", async () => 
   await world.advance(700);
   eq(replacement.snap().board, host.snap().board, "rejoin must see new match, not old winner");
   eq(countDisks(replacement.snap().board), 1);
-  eq(replacement.snap().current, 2);
+  eq(replacement.snap().current, opener === 1 ? 2 : 1, "rejoin replays the same opener");
 });
 
 test("simultaneous rematch requests deterministically restart once", async () => {
@@ -339,10 +341,73 @@ test("simultaneous rematch requests deterministically restart once", async () =>
   await world.advance(800);
   assertConsistent(host, guest, "simultaneous rematch");
   eq(countDisks(host.snap().board), 0);
-  eq(host.snap().current, 1);
+  ok([1, 2].includes(host.snap().current), "rematch opens with a real seat");
   ok(!host.snap().gameOver);
   ok(!host.snap().restartPending);
   eq(world.room.log.filter((action) => action.action_type === "restart").length, 1);
+});
+
+test("the opening seat is random per room and identical on both clients", async () => {
+  const openers = new Set();
+  for (const roomId of ["connect-room", "connect-room-1", "connect-room-2", "connect-room-4", "lobby-x9", "lobby-k2"]) {
+    const { world, host, guest } = await onlinePair({ roomId });
+    assertConsistent(host, guest, roomId + " opening");
+    openers.add(host.snap().current);
+    world.clients.forEach((client) => eq(client.errors.length, 0, roomId + " no errors"));
+  }
+  eq(Array.from(openers).sort(), [1, 2], "both seats get to open across rooms");
+});
+
+test("a guest-opening room lets only the guest move first", async () => {
+  const { world, host, guest, roster } = await onlinePair({ roomId: "connect-room" });
+  eq(host.snap().current, 2, "this room opens with seat 2");
+  eq(guest.snap().current, 2);
+  await play(world, host, 0);
+  eq(countDisks(host.snap().board), 0, "the host cannot steal the opening move");
+  assertConsistent(host, guest, "rejected host opener");
+  await play(world, guest, 3);
+  eq(host.snap().board[5][3], 2, "guest disc lands first");
+  eq(host.snap().current, 1, "turn passes to the host");
+  await play(world, host, 3);
+  assertConsistent(host, guest, "after both opening moves");
+  eq(countDisks(host.snap().board), 2);
+
+  guest.sdk.netDrop(true);
+  await world.advance(100);
+  const replacement = world.add("u2", "Bob");
+  replacement.start(roster);
+  await world.advance(700);
+  eq(replacement.snap().board, host.snap().board, "a rejoin replays the guest-first log");
+  eq(replacement.snap().current, 2);
+});
+
+test("rematch openers vary and stay in sync", async () => {
+  const { world, host, guest } = await onlinePair();
+  const openers = [];
+  for (let match = 0; match < 8; match++) {
+    const opener = host.snap().current;
+    openers.push(opener);
+    const first = opener === 1 ? host : guest;
+    const second = opener === 1 ? guest : host;
+    await play(world, first, 0);
+    await play(world, second, 6);
+    await play(world, first, 1);
+    await play(world, second, 6);
+    await play(world, first, 2);
+    await play(world, second, 5);
+    await play(world, first, 3);
+    await world.advance(700);
+    ok(host.snap().gameOver, "match " + match + " ends");
+    eq(host.snap().winner, opener, "match " + match + " won by the opener");
+    assertConsistent(host, guest, "match " + match + " finish");
+    host.clickRematch();
+    await world.advance(300);
+    guest.clickRematch();
+    await world.advance(500);
+    assertConsistent(host, guest, "match " + match + " restart");
+    eq(countDisks(host.snap().board), 0);
+  }
+  ok(openers.includes(1) && openers.includes(2), "rematches do not always open with one seat: " + openers.join(","));
 });
 
 test("random complete games never diverge or reach an unplayable turn", async () => {

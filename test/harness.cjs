@@ -411,7 +411,10 @@ class World {
   constructor(opts) {
     this.clock = new Clock();
     this.server = new Server(this.clock, opts);
-    this.roomId = "connect-room";
+    // The opening seat is derived from the room id. The default room opens with
+    // seat 1 (the host) so scripted scenarios can assume "host moves first";
+    // pass opts.roomId to exercise a seat-2 opening.
+    this.roomId = (opts && opts.roomId) || "connect-room-1";
     this.clients = [];
   }
 

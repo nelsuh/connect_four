@@ -895,7 +895,42 @@ function registerGameHandlers() {
   });
 }
 
+// ── Who opens a match ─────────────────────────────────────
+// Online, the first move goes to a random seat. It must be the SAME seat on both
+// devices without an extra message, so it is derived from data both already
+// share: the room id for the first match, the durable restart id for rematches.
+let matchRoomId = "";
+let matchStarter = 1;
+
+function seatFromSeed(seed) {
+  let h = 2166136261; // FNV-1a
+  const text = String(seed || "");
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  // FNV's low bit is just the parity of the input bits; mix before picking a seat.
+  h ^= h >>> 16; h = Math.imul(h, 0x85ebca6b);
+  h ^= h >>> 13; h = Math.imul(h, 0xc2b2ae35);
+  h ^= h >>> 16;
+  return (h >>> 31) + 1;
+}
+
+function roomSeed() {
+  if (matchRoomId) return matchRoomId;
+  try { if (window.Usion && Usion.config && Usion.config.roomId) return String(Usion.config.roomId); } catch (_) {}
+  return "";
+}
+
+// restartId: the durable restart action that opened this match (null = first match).
+function setMatchStarter(restartId) {
+  matchStarter = seatFromSeed(restartId ? "restart:" + restartId : "room:" + roomSeed());
+  return matchStarter;
+}
+
 async function setupMultiplayer(roomId) {
+  matchRoomId = String(roomId || "");
+  setMatchStarter(null);
   try {
     await Usion.game.connect();
     registerGameHandlers();
@@ -928,6 +963,7 @@ function onRoomPromoted() {
   waitingForOpponent = true;
   pendingMove = false;
   pendingMoveId = null;
+  setMatchStarter(null);
   init();                 // reset to a clean board for the online match
   showWaiting();
   registerGameHandlers();
@@ -1220,7 +1256,7 @@ function isValidBoardState(candidate) {
 
 function resetBoardForReplay(baseSeq, actionId, beginNewMatch) {
   board = Array.from({ length: ROWS }, () => Array(COLS).fill(0));
-  current = 1;
+  current = setMatchStarter(beginNewMatch ? actionId : null);
   gameOver = false;
   lastWinnerPlayer = 0;
   lastInsertedPos = null;
@@ -1586,6 +1622,7 @@ function resetForRematch(baseSeq, restartId) {
   winnerPlayAgain.textContent = t("rematch");
   winnerPlayAgain.disabled = false;
   winnerPlayAgain.onclick = requestRematch;
+  setMatchStarter(restartId || null);
   init();
   if (restartId) appliedMoveIds.add(restartId);
   lastAppliedSeq = Number(baseSeq) || 0;
@@ -1597,7 +1634,7 @@ function resetForRematch(baseSeq, restartId) {
 
 function init() {
   board = Array.from({ length: ROWS }, () => Array(COLS).fill(0));
-  current = 1;
+  current = isMultiplayer ? matchStarter : 1; // the bot game always lets you open
   gameOver = false;
   pendingMove = false;
   pendingMoveId = null;
