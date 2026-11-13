@@ -1004,3 +1004,10 @@ body[data-skin="classic"]{
 }
 html:has(body[data-skin="classic"]){background:#070926}
 body[data-skin="classic"] .room-glow{display:none}
+
+.token-set-card.is-locked { border-color:rgba(255,209,102,.28); }
+.token-set-card.is-locked .token-set-sides { color:var(--gold); font-size:11px; letter-spacing:0; }
+.token-store-status { margin:0; padding:0 16px; text-align:center; font-size:12px; color:var(--gold); }
+.token-store-status:not(:empty) { padding:10px 16px; }
+#tokenSetGrid[aria-busy="true"] { opacity:.7; }
+img { -webkit-user-drag:none; }

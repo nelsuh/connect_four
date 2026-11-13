@@ -7,6 +7,15 @@ const ROWS = 6, COLS = 7;
 // locales in sync.
 const STR = {
   en: {
+    freeSkin: "Free", ownedSkin: "Owned", buyingSkin: "Processing…",
+    unlockSkin: (name) => "Unlock " + name,
+    skinUnlocked: "Skin unlocked ✓", skinCancelled: "Payment cancelled",
+    skinUnavailable: "Store unavailable. Please try again later.",
+    skinNeedsUsion: "Open in Usion to buy this skin.",
+    skinLoading: "Checking your purchases. Please wait.",
+    skinPending: "Purchase pending. Tap again to retry without paying twice.",
+    skinRetry: "Payment could not complete. Please try again.",
+
     appName: "Pocket Four",
     // topbar / seats
     tokensLabel: "Tokens",
@@ -111,6 +120,15 @@ const STR = {
     "set_tiny-dragons": "Tiny Dragons",
   },
   mn: {
+    freeSkin: "Үнэгүй", ownedSkin: "Авсан", buyingSkin: "Шалгаж байна…",
+    unlockSkin: (name) => name + " скин нээх",
+    skinUnlocked: "Скин нээгдлээ ✓", skinCancelled: "Төлбөр цуцлагдлаа",
+    skinUnavailable: "Дэлгүүр түр боломжгүй байна. Дараа дахин оролдоорой.",
+    skinNeedsUsion: "Скин авахын тулд Usion дотроос нээнэ үү.",
+    skinLoading: "Худалдан авалтыг шалгаж байна. Түр хүлээнэ үү.",
+    skinPending: "Худалдан авалт хүлээгдэж байна. Дахин дарахад давхар төлбөр хасахгүй.",
+    skinRetry: "Төлбөр гүйцэтгэсэнгүй. Дахин оролдоорой.",
+
     appName: "Дөрвөн эгнээ",
     tokensLabel: "Хүүхэлдэй",
     chooseTokenPairAria: "Хүүхэлдэйн хосоо сонго",
@@ -301,14 +319,14 @@ const TOKEN_SETS = [
     colors: ["colorRed", "colorYellow"], sideNames: ["redSide", "yellowSide"], pairName: "redPlusYellow" },
   { id: "prism-pals", sides: ["assets/tokens/prism-pals-1.png", "assets/tokens/prism-pals-2.png"] },
   { id: "orbit-buddies", sides: ["assets/tokens/orbit-buddies-1.png", "assets/tokens/orbit-buddies-2.png"] },
-  { id: "snack-spirits", sides: ["assets/tokens/snack-spirits-1.png", "assets/tokens/snack-spirits-2.png"] },
-  { id: "garden-charms", sides: ["assets/tokens/garden-charms-1.png", "assets/tokens/garden-charms-2.png"] },
-  { id: "royal-blooms", sides: ["assets/tokens/royal-blooms-1.png", "assets/tokens/royal-blooms-2.png"] },
-  { id: "cozy-capybaras", sides: ["assets/tokens/cozy-capybaras-1.png", "assets/tokens/cozy-capybaras-2.png"] },
-  { id: "sky-friends", sides: ["assets/tokens/sky-friends-1.png", "assets/tokens/sky-friends-2.png"] },
-  { id: "forest-sprites", sides: ["assets/tokens/forest-sprites-1.png", "assets/tokens/forest-sprites-2.png"] },
-  { id: "ocean-minis", sides: ["assets/tokens/ocean-minis-1.png", "assets/tokens/ocean-minis-2.png"] },
-  { id: "tiny-dragons", sides: ["assets/tokens/tiny-dragons-1.png", "assets/tokens/tiny-dragons-2.png"] },
+  { id: "snack-spirits", price: 500, sides: ["assets/tokens/snack-spirits-1.png", "assets/tokens/snack-spirits-2.png"] },
+  { id: "garden-charms", price: 500, sides: ["assets/tokens/garden-charms-1.png", "assets/tokens/garden-charms-2.png"] },
+  { id: "royal-blooms", price: 500, sides: ["assets/tokens/royal-blooms-1.png", "assets/tokens/royal-blooms-2.png"] },
+  { id: "cozy-capybaras", price: 500, sides: ["assets/tokens/cozy-capybaras-1.png", "assets/tokens/cozy-capybaras-2.png"] },
+  { id: "sky-friends", price: 500, sides: ["assets/tokens/sky-friends-1.png", "assets/tokens/sky-friends-2.png"] },
+  { id: "forest-sprites", price: 500, sides: ["assets/tokens/forest-sprites-1.png", "assets/tokens/forest-sprites-2.png"] },
+  { id: "ocean-minis", price: 500, sides: ["assets/tokens/ocean-minis-1.png", "assets/tokens/ocean-minis-2.png"] },
+  { id: "tiny-dragons", price: 500, sides: ["assets/tokens/tiny-dragons-1.png", "assets/tokens/tiny-dragons-2.png"] },
 ];
 const DEFAULT_TOKEN_SET_ID = TOKEN_SETS[0].id;
 const TOKEN_STORAGE_KEY = "c4:token-set";
@@ -320,9 +338,140 @@ function isTokenSetId(value) {
 function loadSavedTokenSetId() {
   try {
     const saved = localStorage.getItem(TOKEN_STORAGE_KEY);
-    if (isTokenSetId(saved)) return saved;
+    if (isTokenSetId(saved) && !tokenSetById(saved).price) return saved;
   } catch (_) {}
   return DEFAULT_TOKEN_SET_ID;
+}
+
+// Paid pairs use the same server-verified escrow flow as the other Usion games.
+const TOKEN_UNLOCK_KEY = "c4:unlocks:v1";
+const TOKEN_PENDING_KEY = "c4:pending:v1";
+const TOKEN_INTENT_KEY = "c4:intents:v1";
+const unlockedTokenSets = new Set();
+let tokenUnlocksLoaded = false;
+let tokenPurchaseBusy = false;
+const DEAD_TOKEN_RECEIPTS = new Set(["RECEIPT_REFUNDED", "RECEIPT_ALREADY_BOUND", "INVALID_PURCHASE"]);
+
+function tokenLocalKey(key) { return key + ":" + (myId || "anon"); }
+function readTokenData(key, fallback) {
+  try { return JSON.parse(localStorage.getItem(tokenLocalKey(key))) || fallback; }
+  catch (_) { return fallback; }
+}
+function writeTokenData(key, value) {
+  localStorage.setItem(tokenLocalKey(key), JSON.stringify(value));
+}
+function isTokenUnlocked(set) { return !set.price || unlockedTokenSets.has(set.id); }
+function tokenStoreMessage(key) {
+  const el = document.getElementById("tokenStoreStatus");
+  if (el) el.textContent = key ? t(key) : "";
+}
+async function tokenStoreFetch(options) {
+  const controller = typeof AbortController === "function" ? new AbortController() : null;
+  const timer = controller ? setTimeout(() => controller.abort(), 12000) : null;
+  try {
+    return await fetch("/api/purchase-skin", Object.assign({}, options, controller ? { signal: controller.signal } : {}));
+  } finally { if (timer) clearTimeout(timer); }
+}
+async function saveTokenUnlocks(skinId) {
+  const ids = [...new Set([...unlockedTokenSets, skinId])];
+  // Keep the pending receipt until the database acknowledges delivery.
+  await Usion.storage.set(TOKEN_UNLOCK_KEY, ids);
+  writeTokenData(TOKEN_UNLOCK_KEY, ids);
+  unlockedTokenSets.add(skinId);
+}
+function retireTokenReceipt(skinId) {
+  writeTokenData(TOKEN_PENDING_KEY, null);
+  const intents = readTokenData(TOKEN_INTENT_KEY, {});
+  delete intents[skinId];
+  writeTokenData(TOKEN_INTENT_KEY, intents);
+}
+async function deliverTokenReceipt(pending) {
+  const res = await tokenStoreFetch({
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(pending),
+  });
+  const out = await res.json();
+  if (!res.ok || !out.ok || out.skinId !== pending.skinId) {
+    if (DEAD_TOKEN_RECEIPTS.has(out.error)) retireTokenReceipt(pending.skinId);
+    throw new Error(out.error || "DELIVERY_FAILED");
+  }
+  await saveTokenUnlocks(pending.skinId);
+  retireTokenReceipt(pending.skinId);
+  buildTokenSetPicker();
+}
+async function loadTokenUnlocks() {
+  const cached = readTokenData(TOKEN_UNLOCK_KEY, []);
+  if (Array.isArray(cached)) cached.filter(isTokenSetId).forEach(id => unlockedTokenSets.add(id));
+  try {
+    // A failed ownership lookup must never lead to charging an existing owner.
+    if (!Usion.storage || typeof Usion.storage.get !== "function" || typeof Usion.storage.set !== "function") return;
+    const remote = await Usion.storage.get(TOKEN_UNLOCK_KEY);
+    if (Array.isArray(remote)) remote.filter(isTokenSetId).forEach(id => unlockedTokenSets.add(id));
+    tokenUnlocksLoaded = true;
+    const pending = readTokenData(TOKEN_PENDING_KEY, null);
+    if (pending) {
+      tokenPurchaseBusy = true;
+      try { await deliverTokenReceipt(pending); }
+      catch (_) { tokenStoreMessage("skinPending"); }
+      finally { tokenPurchaseBusy = false; }
+    }
+  } catch (_) { tokenStoreMessage("skinLoading"); }
+  finally {
+    let saved;
+    try { saved = localStorage.getItem(TOKEN_STORAGE_KEY); } catch (_) {}
+    if (isTokenSetId(saved) && isTokenUnlocked(tokenSetById(saved))) selectTokenSet(saved, false);
+    buildTokenSetPicker();
+  }
+}
+async function purchaseTokenSet(set) {
+  if (tokenPurchaseBusy || isTokenUnlocked(set)) return;
+  if (!(window.Usion && Usion.wallet && typeof Usion.wallet.requestPayment === "function" && myId)) {
+    tokenStoreMessage("skinNeedsUsion"); return;
+  }
+  if (!tokenUnlocksLoaded) {
+    tokenStoreMessage("skinLoading");
+    await loadTokenUnlocks();
+    if (!tokenUnlocksLoaded) return;
+    if (isTokenUnlocked(set)) { selectTokenSet(set.id, true); return; }
+  }
+  tokenPurchaseBusy = true;
+  tokenStoreMessage("buyingSkin");
+  if (tokenSetGrid) tokenSetGrid.setAttribute("aria-busy", "true");
+  try {
+    const health = await tokenStoreFetch();
+    const status = await health.json();
+    if (!health.ok || !status.ready || status.price !== set.price) throw new Error("STORE_UNAVAILABLE");
+    // Do not overwrite another pair's undelivered receipt with a new payment.
+    const pending = readTokenData(TOKEN_PENDING_KEY, null);
+    if (pending) {
+      try { await deliverTokenReceipt(pending); }
+      catch (error) { if (!DEAD_TOKEN_RECEIPTS.has(error.message)) throw error; }
+    }
+    if (!isTokenUnlocked(set)) {
+      const intents = readTokenData(TOKEN_INTENT_KEY, {});
+      if (!intents[set.id]) {
+        intents[set.id] = Date.now().toString(36) + Math.random().toString(36).slice(2);
+        writeTokenData(TOKEN_INTENT_KEY, intents);
+      }
+      const payment = await Usion.wallet.requestPayment(set.price, t("unlockSkin", tokenSetName(set)), {
+        idempotencyKey: "connect-four-" + myId + "-" + set.id + "-" + intents[set.id],
+      });
+      if (!payment || !payment.receiptToken) throw new Error("CANCELLED");
+      const receipt = { skinId: set.id, receiptToken: payment.receiptToken };
+      writeTokenData(TOKEN_PENDING_KEY, receipt);
+      await deliverTokenReceipt(receipt);
+    }
+    selectTokenSet(set.id, true);
+    tokenStoreMessage("skinUnlocked");
+  } catch (error) {
+    tokenStoreMessage(error.message === "CANCELLED" || error.code === "CANCELLED" ? "skinCancelled"
+      : error.message === "STORE_UNAVAILABLE" ? "skinUnavailable"
+      : readTokenData(TOKEN_PENDING_KEY, null) ? "skinPending" : "skinRetry");
+  } finally {
+    tokenPurchaseBusy = false;
+    if (tokenSetGrid) tokenSetGrid.setAttribute("aria-busy", "false");
+    buildTokenSetPicker();
+  }
 }
 
 // ── Game state ────────────────────────────────────────────
@@ -525,7 +674,7 @@ function announcePlayerProfile() {
 }
 
 function selectTokenSet(id, announce) {
-  if (!isTokenSetId(id)) return false;
+  if (!isTokenSetId(id) || !isTokenUnlocked(tokenSetById(id))) return false;
   selectedTokenSetId = id;
   if (myId) playerTokenSets[myId] = id;
   try { localStorage.setItem(TOKEN_STORAGE_KEY, id); } catch (_) {}
@@ -545,16 +694,18 @@ function buildTokenSetPicker() {
   TOKEN_SETS.forEach((set) => {
     const button = document.createElement("button");
     button.type = "button";
-    button.className = "token-set-card";
+    const locked = !isTokenUnlocked(set);
+    button.className = "token-set-card" + (locked ? " is-locked" : "");
     button.dataset.tokenSet = set.id;
     button.setAttribute("role", "radio");
     button.setAttribute("aria-checked", String(set.id === selectedTokenSetId));
-    button.setAttribute("aria-label", tokenSetName(set));
+    button.setAttribute("aria-label", tokenSetName(set) + (locked ? ", 500₮" : ""));
 
     const pair = document.createElement("span");
     pair.className = "token-card-pair";
     set.sides.forEach((src, index) => {
       const image = document.createElement("img");
+      image.draggable = false;
       image.src = src;
       image.alt = t(tokenSetLabels(set).sideNames[index]);
       pair.appendChild(image);
@@ -565,11 +716,11 @@ function buildTokenSetPicker() {
     name.textContent = tokenSetName(set);
     const sides = document.createElement("span");
     sides.className = "token-set-sides";
-    sides.textContent = t(tokenSetLabels(set).pairName);
+    sides.textContent = locked ? "🔒 500₮" : (set.price ? t("ownedSkin") : t("freeSkin"));
     button.appendChild(pair);
     button.appendChild(name);
     button.appendChild(sides);
-    button.addEventListener("click", () => selectTokenSet(set.id, true));
+    button.addEventListener("click", () => locked ? purchaseTokenSet(set) : selectTokenSet(set.id, true));
     tokenSetGrid.appendChild(button);
   });
   refreshTokenPickerSelection();
@@ -808,6 +959,7 @@ Usion.init(async function(config) {
     canonicalRoster = config.playerIds.slice(); // platform roster — identical on every device, stable across reconnects
     players = canonicalRoster.slice();
   }
+  loadTokenUnlocks(); // restore purchases without blocking gameplay
   loadStats(); // fire-and-forget; never block init/render
 
   // Register the solo→host promotion handler UP FRONT, regardless of launch mode
@@ -2508,3 +2660,12 @@ if (!usionSdkAvailable) {
   setPlayerDisplayBot();
   init();
 }
+
+// Suppress browser zoom gestures inside the game, including desktop trackpads.
+document.addEventListener("wheel", event => { if (event.ctrlKey || event.metaKey) event.preventDefault(); }, { passive: false });
+document.addEventListener("touchmove", event => { if (event.touches && event.touches.length > 1) event.preventDefault(); }, { passive: false });
+document.addEventListener("gesturestart", event => event.preventDefault(), { passive: false });
+document.addEventListener("keydown", event => {
+  if ((event.ctrlKey || event.metaKey) && ["+", "-", "=", "0"].includes(event.key)) event.preventDefault();
+});
+document.addEventListener("dragstart", event => event.preventDefault());
